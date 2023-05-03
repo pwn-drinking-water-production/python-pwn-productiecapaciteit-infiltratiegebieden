@@ -166,11 +166,11 @@ class WellResistanceAccessor:
                 yc,
                 string,
                 rotation=90,
-                fontsize='small',
+                fontsize="small",
                 va="bottom",
                 ha="center",
                 transform=transform,
-                bbox=dict(alpha=0.5, facecolor="white", linewidth=0)
+                bbox=dict(alpha=0.5, facecolor="white", linewidth=0),
             )
 
 
@@ -204,8 +204,8 @@ class WvpResistanceAccessor:
         # all offsets are negative
         assert np.all(obj.offset <= 0)
         assert obj.method in ("sin", "Niet"), "Method not supported"
-        assert obj.temp_delta >= 0.
-        assert (obj.temp_mean >= 0.) and (obj.temp_mean <= 30.)
+        assert obj.temp_delta >= 0.0
+        assert (obj.temp_mean >= 0.0) and (obj.temp_mean <= 30.0)
         pass
 
     @property
@@ -227,11 +227,11 @@ class WvpResistanceAccessor:
     @property
     def temp_max(self):
         return self._obj.temp_mean + self._obj.temp_delta
-    
+
     @property
     def temp_mean(self):
         return self._obj.temp_mean
-    
+
     @property
     def temp_delta(self):
         return self._obj.temp_delta
@@ -261,14 +261,14 @@ class WvpResistanceAccessor:
             nday_year = end_year.map(lambda x: x.dayofyear)
             dt_year = index - start_year.to_numpy()
             temp_data = (
-                    self.temp_delta
-                    * np.sin(
-                (dt_year / pd.Timedelta("1D") - self.time_offset)
-                * 2
-                * np.pi
-                / nday_year
-            )
-                    + self.temp_mean
+                self.temp_delta
+                * np.sin(
+                    (dt_year / pd.Timedelta("1D") - self.time_offset)
+                    * 2
+                    * np.pi
+                    / nday_year
+                )
+                + self.temp_mean
             )
             temp_df = pd.Series(data=temp_data, index=index, name="wvp_model_temp")
             return temp_df
@@ -296,7 +296,7 @@ class WvpResistanceAccessor:
 
     def a_model_reftemp(self, index):
         """Weerstand bij referentie temp"""
-        dt = (index - self.offset_datum) / pd.Timedelta('1D')
+        dt = (index - self.offset_datum) / pd.Timedelta("1D")
         a = self.offset + self.slope * dt
         return pd.Series(data=a, index=index, name="wvp_model_a at 12degC")
 
@@ -484,10 +484,9 @@ class LeidingResistanceAccessor:
                 yc,
                 string,
                 rotation=90,
-                fontsize='small',
+                fontsize="small",
                 va="bottom",
                 ha="center",
                 transform=transform,
-                bbox=dict(alpha=0.5, facecolor="white", linewidth=0)
+                bbox=dict(alpha=0.5, facecolor="white", linewidth=0),
             )
-

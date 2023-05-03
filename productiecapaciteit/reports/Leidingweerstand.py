@@ -13,19 +13,20 @@ from strang_analyse_fun2 import (
     model_a_leiding,
     smooth,
     get_werkzaamheden_intervals,
-    remove_per_from_werkzh_per
+    remove_per_from_werkzh_per,
 )
 
-from weerstand_pandasaccessors import LeidingResistanceAccessor
+from productiecapaciteit import LeidingResistanceAccessor
 
 res_folder = os.path.join("Resultaat", "Leidingweerstand")
-logger_handler = logging.FileHandler(os.path.join(res_folder, 'Leidingweerstandcoefficient.log'),
-                                     mode='w')  # , encoding='utf-8', level=logging.DEBUG)
+logger_handler = logging.FileHandler(
+    os.path.join(res_folder, "Leidingweerstandcoefficient.log"), mode="w"
+)  # , encoding='utf-8', level=logging.DEBUG)
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logger_handler, stdout]
+    handlers=[logger_handler, stdout],
 )
 
 
@@ -63,13 +64,22 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
         bounds_ = ([slope_val * 10, slope_val / 10], *(nper * ([a_approx * 100, 0],)))
 
     if fit_pt10:
-        x0 += [0.]
-        bounds_ = (*bounds_, [-2., 2.])
+        x0 += [0.0]
+        bounds_ = (*bounds_, [-2.0, 2.0])
 
     bounds = np.array(bounds_).T
 
     try:
-        res = least_squares(cost2, x0=x0, bounds=bounds, loss="arctan", f_scale=0.5, gtol=1e-14, ftol=1e-14, xtol=1e-14)
+        res = least_squares(
+            cost2,
+            x0=x0,
+            bounds=bounds,
+            loss="arctan",
+            f_scale=0.5,
+            gtol=1e-14,
+            ftol=1e-14,
+            xtol=1e-14,
+        )
         if np.any(res.active_mask):
             print("Optimal parameters are outside bounds")
             print(res.active_mask)
@@ -94,12 +104,20 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
 
 
 def analyse_a_leiding(
-    df_dP, df_Q, werkzh_datums, Q_avg, t_projectie="2023-10-31 00:00:00", slope=None, fit_pt10=False
+    df_dP,
+    df_Q,
+    werkzh_datums,
+    Q_avg,
+    t_projectie="2023-10-31 00:00:00",
+    slope=None,
+    fit_pt10=False,
 ):
     """returns df_a"""
     werkzh_datums = list(werkzh_datums)
 
-    _, df_a = get_leiding_slope(df_dP, df_Q, werkzh_datums, slope_val=slope, fit_pt10=fit_pt10)
+    _, df_a = get_leiding_slope(
+        df_dP, df_Q, werkzh_datums, slope_val=slope, fit_pt10=fit_pt10
+    )
 
     if np.all(df_a.leiding.a_effect[1:] <= 1):
         logging.info(f"Effectieve schoonmaken: {werkzh_datums[1:]}")
@@ -128,6 +146,7 @@ def analyse_a_leiding(
     )
     return df_a
 
+
 temp_ref = 12.0
 
 fig_folder = os.path.join("Resultaat")
@@ -152,8 +171,8 @@ for strang, c in config.iterrows():
     #     continue
 
     # print(strang)
-    logger_handler.setFormatter(logging.Formatter(f'{strang}\t| %(message)s'))
-    stdout.setFormatter(logging.Formatter(f'{strang}\t| %(message)s'))
+    logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
+    stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
     logging.info(f"Strang: {strang}")
 
@@ -185,7 +204,13 @@ for strang, c in config.iterrows():
     slope = c.leiding_a_slope
 
     df_a = analyse_a_leiding(
-        df.dP, df.Q, werkzh_datums, Q_avg, t_projectie="2023-10-31 00:00:00", slope=slope, fit_pt10=True
+        df.dP,
+        df.Q,
+        werkzh_datums,
+        Q_avg,
+        t_projectie="2023-10-31 00:00:00",
+        slope=slope,
+        fit_pt10=True,
     )
 
     # save results
@@ -212,13 +237,13 @@ for strang, c in config.iterrows():
     ax2.axhline(0, c="black", lw="0.8")
     df_a.leiding.plot_werkzh(ax2, werkzh_datums)
     ax2.plot(
-        df.index,
-        smooth(df.P - df.gws0, days=1),
-        label="Gemeten verlaging (dag gem.)")
+        df.index, smooth(df.P - df.gws0, days=1), label="Gemeten verlaging (dag gem.)"
+    )
     ax2.plot(
         df.index,
         df_a.leiding.dp_model(df.index, smooth(df.Q, days=1)),
-        label=f"Model {df_a.slope.mean():.3g}")
+        label=f"Model {df_a.slope.mean():.3g}",
+    )
     ax2.set_ylim(-4, 1)
     ax2.set_xlim(df.index[[0, -1]])
     ax2.set_ylabel(f"Verlaging bij gemeten Q (m)")
@@ -231,11 +256,13 @@ for strang, c in config.iterrows():
     ax3.plot(
         df.index,
         smooth((df.P - df.gws0) / df.Q**2 * Q_avg**2, days=1),
-        label="Gemeten verlaging (dag gem.)")
+        label="Gemeten verlaging (dag gem.)",
+    )
     ax3.plot(
         df.index,
         df_a.leiding.dp_model(df.index, Q_avg),
-        label=f"Model {df_a.slope.mean():.3g}")
+        label=f"Model {df_a.slope.mean():.3g}",
+    )
     ax3.set_ylim(-4, 1)
     ax3.set_xlim(df.index[[0, -1]])
     ax3.set_ylabel(f"Verlaging bij Q={Q_avg:.0f} m3/h (m)")
@@ -245,13 +272,16 @@ for strang, c in config.iterrows():
     fig.savefig(fig_path, dpi=300)
     logging.info(f"Saved result to {fig_path}")
 
-
     if 1:
-        res, d2 = get_leiding_slope(df.dP, df.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True)
+        res, d2 = get_leiding_slope(
+            df.dP, df.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True
+        )
         offset = res.x[-1]
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
         ax.scatter(df.Q, df.dP + offset, s=1, c="C0", alpha=0.1)
-        ax.scatter(df.Q, d2.leiding.dp_model(df.index, flow=df.Q), s=1, c="C1", alpha=0.1)
+        ax.scatter(
+            df.Q, d2.leiding.dp_model(df.index, flow=df.Q), s=1, c="C1", alpha=0.1
+        )
         fig.suptitle(strang + f": inclusief offset {offset:.2f}m")
         fig_path = os.path.join(res_folder, f"pt10offset - {strang}.png")
         fig.savefig(fig_path, dpi=300)

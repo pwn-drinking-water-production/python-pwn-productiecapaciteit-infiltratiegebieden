@@ -7,14 +7,16 @@
 """
 
 import os
-from ..src.capaciteit_strang import get_config
-import dawacotools as dw
-import pandas as pd
-import numpy as np
 from datetime import timedelta
+
+import dawacotools as dw
+import numpy as np
+import pandas as pd
+
 from data_functions import get_knmi_bodemtemperature
 from data_functions import prepare_strang_data
 from data_functions import read_plenty_excel
+from productiecapaciteit import get_config
 
 data_fd = os.path.join("..", "Data")
 config_fn = "strang_props6.xlsx"

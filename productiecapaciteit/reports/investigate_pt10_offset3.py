@@ -12,16 +12,18 @@ from strang_analyse_fun2 import (
     get_false_measurements,
     model_a_leiding,
     get_werkzaamheden_intervals,
-    remove_per_from_werkzh_per
+    remove_per_from_werkzh_per,
 )
+
 res_path = os.path.join("Resultaat", "PT10offset")
-logger_handler = logging.FileHandler(os.path.join(res_path, 'Leidingweerstandcoefficient.log'),
-                                     mode='w')  # , encoding='utf-8', level=logging.DEBUG)
+logger_handler = logging.FileHandler(
+    os.path.join(res_path, "Leidingweerstandcoefficient.log"), mode="w"
+)  # , encoding='utf-8', level=logging.DEBUG)
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logger_handler, stdout]
+    handlers=[logger_handler, stdout],
 )
 """
 De dP_leiding van IK104, IK105 en IK106 vertonen grote offsets
@@ -48,7 +50,7 @@ def get_leiding_slope_per_year2(df_, periods, freq="3H", Q=None, slope=None):
     if Q is None:
         dP = df.dP_leiding
     else:
-        dP = df.dP_leiding / df.Q ** 2 * Q ** 2
+        dP = df.dP_leiding / df.Q**2 * Q**2
         assert np.all(np.isfinite(dP)), "Q is zero or nan values in df"
 
     def fun(theta):
@@ -67,13 +69,18 @@ def get_leiding_slope_per_year2(df_, periods, freq="3H", Q=None, slope=None):
 
     cost3 = lambda args: cost2(args, slope=slope)
 
-    a_approx = -(df.dP_leiding / df.Q ** 2).median()
+    a_approx = -(df.dP_leiding / df.Q**2).median()
     dx_days = (dP.index - dP.index[0]) / timedelta(days=1)
-    slope_approx = (np.sum(dx_days * dP) - dP.size * np.median(dx_days) * np.median(dP)) / (
-                np.sum(dx_days * dx_days) - dP.size * np.median(dx_days) * np.median(dx_days))
+    slope_approx = (
+        np.sum(dx_days * dP) - dP.size * np.median(dx_days) * np.median(dP)
+    ) / (np.sum(dx_days * dx_days) - dP.size * np.median(dx_days) * np.median(dx_days))
     x0 = [0.0, -5e-9] + nper * [a_approx]
 
-    bounds_ = ([-0.5, 0.5], [-5e-6, -1e-10], *(nper * ([a_approx / 10, a_approx * 10],)))
+    bounds_ = (
+        [-0.5, 0.5],
+        [-5e-6, -1e-10],
+        *(nper * ([a_approx / 10, a_approx * 10],)),
+    )
     bounds = np.array(bounds_).T
 
     try:
@@ -111,7 +118,7 @@ werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
 
 
 def analyse_a_leiding_voordeel_schoonmaak(
-        df, werkzh_per, slope, offsets, Q_avg=None, t_projectie="2023-10-31 00:00:00"
+    df, werkzh_per, slope, offsets, Q_avg=None, t_projectie="2023-10-31 00:00:00"
 ):
     if Q_avg is None:
         Q_avg = df.Q.median()
@@ -135,7 +142,8 @@ def analyse_a_leiding_voordeel_schoonmaak(
         m_a_red_frac_result.append(m_a_red_frac)
 
         logging.info(
-            f"Schoonmaak van {start} reduceert de frictie coefficient met {-m_a_red_frac:.1f}%. Verval bij gem debiet gaat van {m_avg[:start][-2]:.2f}m naar {m_avg[start:][0]:.2f}m")
+            f"Schoonmaak van {start} reduceert de frictie coefficient met {-m_a_red_frac:.1f}%. Verval bij gem debiet gaat van {m_avg[:start][-2]:.2f}m naar {m_avg[start:][0]:.2f}m"
+        )
 
     mean_result = np.mean(m_a_red_frac_result)
 
@@ -148,12 +156,12 @@ def analyse_a_leiding_voordeel_schoonmaak(
         tend = m_a[~m_a.isna()].index[-1]
         end = m_a[~m_a.isna()][-1]
         projected_voor = end + slope * (
-                pd.Timestamp(t_projectie) - tend
+            pd.Timestamp(t_projectie) - tend
         ) / pd.Timedelta(days=1)
         projected_na = projected_voor * (100 + mean_result) / 100
 
-        projected_dP_voor = projected_voor * Q_avg ** 2
-        projected_dP_na = projected_na * Q_avg ** 2
+        projected_dP_voor = projected_voor * Q_avg**2
+        projected_dP_na = projected_na * Q_avg**2
 
         logging.info(
             f"Bij schoonmaak in {t_projectie} gaat verval bij gem debiet gaat van {projected_dP_voor:.2f}m naar {projected_dP_na:.2f}m"
@@ -161,7 +169,9 @@ def analyse_a_leiding_voordeel_schoonmaak(
         return np.array(m_a_red_frac_result), (projected_voor, projected_na)
 
 
-def analyse_a_leiding(df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 00:00:00", slope=None):
+def analyse_a_leiding(
+    df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 00:00:00", slope=None
+):
     """
     *  0 : a constraint is not active.
     * -1 : a lower bound is active.
@@ -196,9 +206,11 @@ def analyse_a_leiding(df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 0
             df, werkzh_per, freq="1H", Q=Q_avg, slope=slope
         )
 
-        gains, projected, werkzh_per = analyse_a_leiding(df, res, werkzh_per, Q_avg=Q_avg, t_projectie=t_projectie)
+        gains, projected, werkzh_per = analyse_a_leiding(
+            df, res, werkzh_per, Q_avg=Q_avg, t_projectie=t_projectie
+        )
     else:
-        logging.info('Alle schoonmaken hebben zin')
+        logging.info("Alle schoonmaken hebben zin")
 
     return gains, projected, werkzh_per
 
@@ -223,8 +235,8 @@ for strang, c in config.iterrows():
         continue
 
     # print(strang)
-    logger_handler.setFormatter(logging.Formatter(f'{strang}\t| %(message)s'))
-    stdout.setFormatter(logging.Formatter(f'{strang}\t| %(message)s'))
+    logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
+    stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
     logging.info(f"Strang: {strang}")
 
@@ -246,11 +258,13 @@ for strang, c in config.iterrows():
     df.loc[untrusted_measurements] = np.nan
     df["dP_leiding"] = smooth(df.P - df.gws0, days=0.5)
 
-    werkzh_per = get_werkzaamheden_intervals(df.dP_leiding.dropna().index, werkzh_fp, strang)
+    werkzh_per = get_werkzaamheden_intervals(
+        df.dP_leiding.dropna().index, werkzh_fp, strang
+    )
     pers = np.array([i[0] for i in werkzh_per][1:])
 
     # bonus mask
-    a200 = df.dP_leiding / df.Q ** 2 * 200 ** 2
+    a200 = df.dP_leiding / df.Q**2 * 200**2
     lims = np.nanpercentile(a200, q=[5, 95])
     df.loc[a200 < lims[0]] = np.nan
     df.loc[a200 > lims[1]] = np.nan
@@ -266,8 +280,14 @@ for strang, c in config.iterrows():
         continue
 
     # Continue computation with only the werkzh_per that matter
-    gains, projected, werkzh_per2 = analyse_a_leiding(df, res, werkzh_per, Q_avg=None,
-                                                      t_projectie="2023-10-31 00:00:00", slope=c.leiding_a_slope)
+    gains, projected, werkzh_per2 = analyse_a_leiding(
+        df,
+        res,
+        werkzh_per,
+        Q_avg=None,
+        t_projectie="2023-10-31 00:00:00",
+        slope=c.leiding_a_slope,
+    )
     res, dP_leiding_model = get_leiding_slope_per_year2(
         df, werkzh_per2, freq="1H", Q=Q_fit, slope=c.leiding_a_slope
     )
@@ -284,27 +304,47 @@ for strang, c in config.iterrows():
     fig, axs = plt.subplots(2, 1, figsize=(12, 5), gridspec_kw=gridspec_kw)
     fig.suptitle(strang)
     ax = axs[0]
-    ax.vlines(pers, ymin=0, ymax=1, linewidth=1, color='C4', transform=ax.get_xaxis_transform(),
-              label='Werkzaamheden volgens Excel')
-    ax.vlines(pers2, ymin=0, ymax=1, linewidth=1, color='C5', transform=ax.get_xaxis_transform(),
-              label='Werkzaamheden meegenomen in model')
+    ax.vlines(
+        pers,
+        ymin=0,
+        ymax=1,
+        linewidth=1,
+        color="C4",
+        transform=ax.get_xaxis_transform(),
+        label="Werkzaamheden volgens Excel",
+    )
+    ax.vlines(
+        pers2,
+        ymin=0,
+        ymax=1,
+        linewidth=1,
+        color="C5",
+        transform=ax.get_xaxis_transform(),
+        label="Werkzaamheden meegenomen in model",
+    )
     ax.plot(df.index, df["dP_leiding"], c="C0")
     m = model_a_leiding(df, werkzh_per2, slope, offsets)
     ax.plot(m.index, m, c="C4")
-    ax.legend(fontsize='small')
+    ax.legend(fontsize="small")
 
     ax2 = ax.twinx()
     ax2.plot(df.index, smooth(df.Q, days=0.5), linewidth=0.8, c="C2")
 
-    df["axx_leiding"] = df.dP_leiding / df.Q ** 2 * Q_fit ** 2
+    df["axx_leiding"] = df.dP_leiding / df.Q**2 * Q_fit**2
 
     m = model_a_leiding(df, werkzh_per2, slope, offsets, Q=Q_fit)
     m.plot(ax=axs[1])
-    df["axx_leiding"].plot(ax=axs[1], )
+    df["axx_leiding"].plot(
+        ax=axs[1],
+    )
     axs[0].set_ylim((-4, 0))
     axs[1].set_ylim((-4, 0))
-    fig.savefig(os.path.join(res_path, f"Leidingweerstandcoefficient - {strang}.png"), dpi=300)
-    logging.info(f"Saved result to {os.path.join('Resultaat', f'Leidingweerstandcoefficient - {strang}.png')}")
+    fig.savefig(
+        os.path.join(res_path, f"Leidingweerstandcoefficient - {strang}.png"), dpi=300
+    )
+    logging.info(
+        f"Saved result to {os.path.join('Resultaat', f'Leidingweerstandcoefficient - {strang}.png')}"
+    )
 
     plt.show()
 

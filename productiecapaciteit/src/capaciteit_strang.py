@@ -5,9 +5,9 @@ import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 
-from weerstand_pandasaccessors import LeidingResistanceAccessor
-from weerstand_pandasaccessors import WellResistanceAccessor
-from weerstand_pandasaccessors import WvpResistanceAccessor
+from productiecapaciteit import LeidingResistanceAccessor
+from productiecapaciteit import WellResistanceAccessor
+from productiecapaciteit import WvpResistanceAccessor
 
 
 def get_config(fn):
@@ -31,8 +31,9 @@ class strangWeerstand(object):
         self.druk_limiet = druk_limiet  # onderdruk vacuumsysteem
         self.test_dates = {
             # 'test2009': datetime(2009, 8, 18),
-            'test2015': datetime(2015, 6, 30),
-            'test2021': datetime(2021, 6, 14)}
+            "test2015": datetime(2015, 6, 30),
+            "test2021": datetime(2021, 6, 14),
+        }
 
     @property
     def lei(self):
@@ -177,7 +178,9 @@ class strangWeerstand(object):
         )
 
         flow_min = self.lim_flow_min(index, deltah_veilig=deltah_veilig)
-        ax.plot(index, flow_min, label="Minimale inzet", lw=2, c=f"C{nlims + 2}", ls="--")
+        ax.plot(
+            index, flow_min, label="Minimale inzet", lw=2, c=f"C{nlims + 2}", ls="--"
+        )
 
         dates = weerstand.test_dates.values()
         flows = [weerstand.__dict__[key] for key in weerstand.test_dates.keys()]

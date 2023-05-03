@@ -7,7 +7,6 @@
 """
 
 import os
-from ..src.capaciteit_strang import get_config
 import dawacotools as dw
 import pandas as pd
 import numpy as np
@@ -84,7 +83,7 @@ def read_plenty_excel(plenty_path):
         plenty_data.set_index("ophaal tijdstip", inplace=True)
 
         if (
-                "index" in plenty_data
+            "index" in plenty_data
         ):  # in some datasets a column named index falsely appeared
             del plenty_data["index"]
 
@@ -95,7 +94,7 @@ def read_plenty_excel(plenty_path):
         plenty_data["ophaal tijdstip"] = pd.to_datetime(plenty_data["ophaal tijdstip"])
 
         if (
-                "index" in plenty_data
+            "index" in plenty_data
         ):  # in some datasets a column named index falsely appeared
             del plenty_data["index"]
 

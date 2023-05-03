@@ -5,9 +5,9 @@ import pandas as pd
 from ..src.capaciteit_strang import strangWeerstand
 from ..src.capaciteit_strang import get_config
 
-from ..src.weerstand_pandasaccessors import LeidingResistanceAccessor
-from ..src.weerstand_pandasaccessors import WellResistanceAccessor
-from ..src.weerstand_pandasaccessors import WvpResistanceAccessor
+from productiecapaciteit import LeidingResistanceAccessor
+from productiecapaciteit import WellResistanceAccessor
+from productiecapaciteit import WvpResistanceAccessor
 
 res_folder = os.path.join("Resultaat", "Synthese")
 logger_handler = logging.FileHandler(
@@ -45,7 +45,6 @@ wvpweerstand_fp = os.path.join(
 )
 
 index = pd.date_range("2012-05-01", "2025-12-31")
-
 
 
 for strang, c in config.iterrows():
