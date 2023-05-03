@@ -3,6 +3,8 @@
 2. Remove cache: Data/Plenty/Q, P, 09, and 10.feather
 3. Update bodemtemps_260.txt
 4. Check the content of config_fn, e.g., number of wells etc.
+5. Run dit bestand
+6. Update Werkzaamheden.xlsx (Gerhard Coetzee)
 
 """
 
