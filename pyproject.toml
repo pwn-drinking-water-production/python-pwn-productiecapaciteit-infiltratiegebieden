@@ -18,6 +18,7 @@ maintainers = [
 requires-python = ">= 3.8"
 dependencies = [
     "pandas<2.0",
+    "pyarrow",
     "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git"
 
 ]
