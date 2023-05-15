@@ -7,18 +7,20 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from strang_analyse_fun2 import (
+from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
     model_a_leiding,
     smooth,
-    get_werkzaamheden_intervals,
+    # get_werkzaamheden_intervals,
     remove_per_from_werkzh_per,
+    werkzaamheden_dates
 )
+# from productiecapaciteit.src.
 
-from productiecapaciteit import LeidingResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
 
-res_folder = os.path.join("Resultaat", "Leidingweerstand")
+res_folder = os.path.join("..", "results", "Leidingweerstand")
 logger_handler = logging.FileHandler(
     os.path.join(res_folder, "Leidingweerstandcoefficient.log"), mode="w"
 )  # , encoding='utf-8', level=logging.DEBUG)
@@ -197,8 +199,9 @@ for strang, c in config.iterrows():
     df["dPdQ2"] = df.dP / df.Q**2
     df["dPdQ2_smooth"] = smooth(df.dPdQ2, days=0.5)
 
-    werkzh_per = get_werkzaamheden_intervals(df.dPdQ2.dropna().index, werkzh_fp, strang)
-    werkzh_datums = np.array([i[0] for i in werkzh_per])
+    # werkzh_per = get_werkzaamheden_intervals(df.dPdQ2.dropna().index, werkzh_fp, strang)
+    # werkzh_datums = np.array([i[0] for i in werkzh_per])
+    werkzh_datums = np.concatenate((df.dPdQ2.dropna().index[[0]].values.astype('datetime64[D]'), werkzaamheden_dates()[strang])).astype('datetime64[D]')
 
     Q_avg = df.Q.mean()
     slope = c.leiding_a_slope

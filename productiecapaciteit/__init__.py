@@ -1,5 +1,0 @@
-from src.capaciteit_strang import get_config
-from src.capaciteit_strang import strangWeerstand
-from src.weerstand_pandasaccessors import LeidingResistanceAccessor
-from src.weerstand_pandasaccessors import WellResistanceAccessor
-from src.weerstand_pandasaccessors import WvpResistanceAccessor
