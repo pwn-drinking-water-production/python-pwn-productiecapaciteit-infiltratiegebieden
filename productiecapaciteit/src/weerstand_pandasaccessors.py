@@ -345,7 +345,7 @@ class LeidingResistanceAccessor:
             raise AttributeError("Must have 'datum' and 'offset' and 'slope'.")
 
         # all dates are sorted
-        assert np.all(obj.datum.diff()[1:] > pd.Timedelta(days=1))
+        assert np.all(obj.datum.diff()[1:] > pd.Timedelta(days=0))
 
         # all slopes are negative
         assert np.all(obj.slope <= 0)
@@ -401,6 +401,7 @@ class LeidingResistanceAccessor:
         return self.a_voor_projectie(datum_projectie) * reductie
 
     def a_model(self, index):
+        index = pd.Index(index)
         d_offset = pd.Series(index=index, data=0.0)
         d_slope = pd.Series(index=index, data=0.0)
         d_days_since_wzh = pd.Series(index=index, data=0.0)
@@ -426,6 +427,32 @@ class LeidingResistanceAccessor:
         d_slope[: datums[0]] = 0.0
 
         return d_offset + d_slope * d_days_since_wzh
+
+    def add_zero_effect_dates(self, dates):
+        # add dates with zero effect inplace
+        dates = pd.Index(dates)
+        dates_new = list(filter(lambda x: x not in self.datum, dates))
+        nnew = len(dates_new)
+        offsets_new = self.a_model(dates_new).values
+        slopes_new = np.tile(self.slope[[0]], nnew)
+        gewijzigd_new = np.tile([pd.Timestamp.now()], nnew)
+
+        df_new = pd.DataFrame({
+            "datum": dates_new,
+            "offset": offsets_new,
+            "slope": slopes_new,
+            "gewijzigd": gewijzigd_new
+        })
+
+        values_new = np.insert(self._obj.values, 0, values=df_new.values, axis=0)
+        pandas_obj = pd.DataFrame(
+            data=values_new,
+            columns=self._obj.columns,
+        ).sort_values("datum", ignore_index=True)
+
+        self._validate(pandas_obj)
+        self._obj = pandas_obj
+        pass
 
     def dp_voor(self, flow):
         return self.a_voor * flow**2

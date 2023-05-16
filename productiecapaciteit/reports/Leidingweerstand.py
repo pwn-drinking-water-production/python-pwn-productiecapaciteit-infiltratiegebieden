@@ -169,8 +169,10 @@ werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
 df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 
 for strang, c in config.iterrows():
-    # if strang != "IK106":
+    # if "P" in strang or "Q" in strang:
     #     continue
+    if strang != 'IK106':
+        continue
 
     # print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
@@ -201,7 +203,9 @@ for strang, c in config.iterrows():
 
     # werkzh_per = get_werkzaamheden_intervals(df.dPdQ2.dropna().index, werkzh_fp, strang)
     # werkzh_datums = np.array([i[0] for i in werkzh_per])
-    werkzh_datums = np.concatenate((df.dPdQ2.dropna().index[[0]].values.astype('datetime64[D]'), werkzaamheden_dates()[strang])).astype('datetime64[D]')
+    dates = werkzaamheden_dates()[strang]
+    dates = dates[dates>df.dPdQ2.dropna().index[0]]
+    werkzh_datums = np.concatenate((df.dPdQ2.dropna().index[[0]].values.astype('datetime64[D]'), dates)).astype('datetime64[D]')
 
     Q_avg = df.Q.mean()
     slope = c.leiding_a_slope
@@ -213,11 +217,11 @@ for strang, c in config.iterrows():
         Q_avg,
         t_projectie="2023-10-31 00:00:00",
         slope=slope,
-        fit_pt10=True,
+        fit_pt10=False,
     )
 
-    # save results
     df_a["gewijzigd"] = pd.Timestamp.now()
+    df_a.leiding.add_zero_effect_dates(dates)
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
