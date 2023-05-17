@@ -9,7 +9,7 @@ import dawacotools as dw
 # vanaf najaar 2015 uit Sander Uitendaal's schemas
 # Tussen najaar 2012 en najaar 2015 schatting uit SAP lijst van Gerhard
 werkzaamheden_dict = {
-    "Q100": [(2017, 40, 41), (2021, 35, 36)],
+    "Q100": [(2017, 40, 41), (2019, 1, 1), (2021, 35, 36)],
     "Q200": [(2016, 48, 49), (2020, 43, 44)],
     "Q300": [(2014, 38, 38), (2017, 36, 37), (2020, 48, 49)],
     "Q400": [(2017, 8, 10), (2020, 36, 37), (2023, 7, 8)],
@@ -96,7 +96,7 @@ def werkzaamheden_dates():
         date_avg = date_start + (date_end - date_start) / 2
         return date_avg
 
-    d = {k: np.array([yr_wk_to_date(*vv) for vv in v]) for k, v in werkzaamheden_dict.items()}
+    d = {k: pd.Index([yr_wk_to_date(*vv) for vv in v]) for k, v in werkzaamheden_dict.items()}
     return d
 
 

@@ -104,6 +104,35 @@ class WellResistanceAccessor:
 
         return d_offset + d_slope * d_days_since_wzh
 
+    def add_zero_effect_dates(self, dates):
+        # add dates with zero effect. inplace not possible
+        dates = pd.Index(dates)
+        dates_new = list(filter(lambda x: x not in self.datum, dates))
+        nnew = len(dates_new)
+
+        if nnew == 0:
+            return self._obj
+
+        offsets_new = self.a_model(dates_new).values
+        slopes_new = np.tile(self.slope[[0]], nnew)
+        gewijzigd_new = np.tile([pd.Timestamp.now()], nnew)
+
+        df_new = pd.DataFrame({
+            "datum": dates_new,
+            "offset": offsets_new,
+            "slope": slopes_new,
+            "gewijzigd": gewijzigd_new
+        })
+
+        values_new = np.insert(self._obj.values, 0, values=df_new.values, axis=0)
+        pandas_obj = pd.DataFrame(
+            data=values_new,
+            columns=self._obj.columns,
+        ).sort_values("datum", ignore_index=True)
+
+        self._validate(pandas_obj)
+        return pandas_obj
+
     def dp_voor(self, flow):
         # Flow per put
         return self.a_voor * flow
@@ -429,10 +458,14 @@ class LeidingResistanceAccessor:
         return d_offset + d_slope * d_days_since_wzh
 
     def add_zero_effect_dates(self, dates):
-        # add dates with zero effect inplace
+        # add dates with zero effect. inplace not possible
         dates = pd.Index(dates)
         dates_new = list(filter(lambda x: x not in self.datum, dates))
         nnew = len(dates_new)
+
+        if nnew == 0:
+            return self._obj
+
         offsets_new = self.a_model(dates_new).values
         slopes_new = np.tile(self.slope[[0]], nnew)
         gewijzigd_new = np.tile([pd.Timestamp.now()], nnew)
@@ -451,8 +484,7 @@ class LeidingResistanceAccessor:
         ).sort_values("datum", ignore_index=True)
 
         self._validate(pandas_obj)
-        self._obj = pandas_obj
-        pass
+        return pandas_obj
 
     def dp_voor(self, flow):
         return self.a_voor * flow**2

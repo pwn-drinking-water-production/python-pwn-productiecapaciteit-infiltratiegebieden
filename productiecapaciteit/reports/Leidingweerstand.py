@@ -171,8 +171,8 @@ df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang:
     #     continue
-    if strang != 'IK106':
-        continue
+    # if strang != 'P200':
+    #     continue
 
     # print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
@@ -205,7 +205,7 @@ for strang, c in config.iterrows():
     # werkzh_datums = np.array([i[0] for i in werkzh_per])
     dates = werkzaamheden_dates()[strang]
     dates = dates[dates>df.dPdQ2.dropna().index[0]]
-    werkzh_datums = np.concatenate((df.dPdQ2.dropna().index[[0]].values.astype('datetime64[D]'), dates)).astype('datetime64[D]')
+    werkzh_datums = pd.Index(np.concatenate((df.dPdQ2.dropna().index[[0]].values, dates)))
 
     Q_avg = df.Q.mean()
     slope = c.leiding_a_slope
@@ -221,7 +221,7 @@ for strang, c in config.iterrows():
     )
 
     df_a["gewijzigd"] = pd.Timestamp.now()
-    df_a.leiding.add_zero_effect_dates(dates)
+    df_a = df_a.leiding.add_zero_effect_dates(dates)
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 

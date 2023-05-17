@@ -5,9 +5,19 @@ import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 
-from productiecapaciteit import LeidingResistanceAccessor
-from productiecapaciteit import WellResistanceAccessor
-from productiecapaciteit import WvpResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor
+
+
+gridspec_kw = {
+    "left": 0.07,
+    "bottom": 0.12,
+    "right": 0.92,
+    "top": 0.88,
+    "wspace": 0.2,
+    "hspace": 0.2,
+}
 
 
 def get_config(fn):
@@ -115,6 +125,10 @@ class strangWeerstand(object):
         flow_min[flow_min < 0.0] = 0
         return flow_min
 
+    def lim_flow_min_schoonmaak(self, index, date_clean, leiding=True, wel=True):
+        strang2 = self.get_schoonmaakscenario(date_clean, leiding=leiding, wel=wel)
+        return strang2.lim_flow_min(index, deltah_veilig=1.5)
+
     def capaciteit(self, index):
         return self.lims(index).min(axis=1)
 
@@ -136,9 +150,12 @@ class strangWeerstand(object):
 
         return strang2
 
-    def capaciteit_schoonmaak(self, date_clean, date_test, leiding=True, wel=True):
+    def lims_schoonmaak(self, date_clean, date_test, leiding=True, wel=True):
         strang2 = self.get_schoonmaakscenario(date_clean, leiding=leiding, wel=wel)
-        return strang2.capaciteit(date_test)
+        return strang2.lims(date_test)
+
+    def capaciteit_schoonmaak(self, date_clean, date_test, leiding=True, wel=True):
+        return self.lims_schoonmaak(date_clean, date_test, leiding=leiding, wel=wel).min(axis=1)
 
     def capaciteit_effect_schoonmaak(
         self, date_clean, date_test, leiding=True, wel=True
@@ -156,34 +173,51 @@ class strangWeerstand(object):
         return strang2.capaciteit_cat(date_test)
 
     def plot_lims(self, index, date_clean, ax=None, deltah_veilig=1.5):
-        lims = self.lims(index)
-        for ilim, lim in enumerate(lims):
-            ax.plot(index, lims[lim], lw=0.8, label=lim, c=f"C{ilim}")
-
-        cap = self.capaciteit(index)
-        nlims = lims.columns.size
-        ax.plot(index, cap, lw=2, label="Zonder schoonmaak", c=f"C{nlims}", ls="--")
-
+        index_voor = index[index < date_clean]
         index_na = index[index >= date_clean]
-        cap_na_schoonmaak = self.capaciteit_schoonmaak(
+
+        #### Capacity
+        # Before cleaning
+        # show = index < date_clean
+        lims_voor = self.lims(index_voor)
+        lims_na = self.lims(index_na)
+        for ilim, lim in enumerate(lims_voor):
+            ax.plot(index_voor, lims_voor[lim], lw=0.8, label=lim, c=f"C{ilim}")
+            ax.plot(index_na, lims_na[lim], lw=0.8, c=f"C{ilim}", alpha=0.3)
+
+        cap = self.capaciteit(index_voor)
+        nlims = lims_voor.columns.size
+        ax.plot(index_voor, cap, lw=2, label="Max. inzet zonder schoonmaak", c=f"C{nlims}", ls=":")
+
+        # Take into account the cleaning
+        lims_na = self.lims_schoonmaak(date_clean, index_na, leiding=True, wel=True)
+        for ilim, lim in enumerate(lims_na):
+            ax.plot(index_na, lims_na[lim], lw=0.8, c=f"C{ilim}")
+
+        cap = self.capaciteit_schoonmaak(
             date_clean, index_na, leiding=True, wel=True
         )
+        ax.plot(index_na, cap, lw=2, label="Max. inzet na schoonmaak", c=f"C{nlims + 1}", ls=":")
+
+        #### Minimal flow
+        # Before cleaning
+        flow_min_voor = self.lim_flow_min(index_voor, deltah_veilig=deltah_veilig)
+        flow_min_na = self.lim_flow_min(index_na, deltah_veilig=deltah_veilig)
         ax.plot(
-            index_na,
-            cap_na_schoonmaak,
-            lw=2,
-            label="Na schoonmaak",
-            c=f"C{nlims + 1}",
-            ls="--",
+            index_voor, flow_min_voor, label="Min. inzet voor schoonmaak", lw=1, c=f"C{nlims + 2}", ls="--"
+        )
+        ax.plot(
+            index_na, flow_min_na, lw=2, c=f"C{nlims + 2}", ls="--", alpha=0.3
         )
 
-        flow_min = self.lim_flow_min(index, deltah_veilig=deltah_veilig)
+        # After cleaning
+        flow_min_na = self.lim_flow_min_schoonmaak(index_na, date_clean, leiding=True, wel=True)
         ax.plot(
-            index, flow_min, label="Minimale inzet", lw=2, c=f"C{nlims + 2}", ls="--"
+            index_na, flow_min_na, label="Min. inzet na schoonmaak", lw=1, c=f"C{nlims + 3}", ls="--"
         )
 
-        dates = weerstand.test_dates.values()
-        flows = [weerstand.__dict__[key] for key in weerstand.test_dates.keys()]
+        dates = self.test_dates.values()
+        flows = [self.__dict__[key] for key in self.test_dates.keys()]
         ax.scatter(dates, flows, label="Gemeten", c="black")
 
         self.plot_schoonmaak(ax, [date_clean], label="Schoonmaak moment")
@@ -200,7 +234,8 @@ class strangWeerstand(object):
             y2=0.095,
             leiding=False,
             wel=False,
-            info=None,
+            info="Voor schoonmaak",
+            legend=True
         )
         self.plot_lim_cat(
             date_clean,
@@ -210,6 +245,7 @@ class strangWeerstand(object):
             y2=0.045,
             leiding=True,
             wel=True,
+            info="Na schoonmaak",
             legend=False,
         )
 
@@ -223,7 +259,7 @@ class strangWeerstand(object):
         pass
 
     def plot_capaciteit_effect_schoonmaak(
-        self, date_clean, date_test, ax=None, y0=0, thick=0.08, legend=True
+        self, date_clean, date_test, date_goal, ax=None, y0=0, thick=0.08, legend=True,
     ):
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(10, 5), gridspec_kw=gridspec_kw)
@@ -250,7 +286,34 @@ class strangWeerstand(object):
 
         self.plot_schoonmaak(ax, [date_clean], label="Schoonmaak moment")
         self.plot_schoonmaak(ax, self.get_schoonmaak_dates(), label="")
-        ax.legend(fontsize="small", loc="upper left", title="Effect schoonmaak")
+
+        string = date_goal.strftime(f"%Y-%m-%d: {effect_som[date_goal]:.0f} m$^3$/d extra")
+        transform = ax.get_xaxis_transform()
+        ax.text(
+            date_goal,
+            0.5,
+            string,
+            rotation=90,
+            fontsize="small",
+            va="center",
+            ha="left",
+            transform=transform,
+            bbox=dict(alpha=0.5, facecolor="white", linewidth=0),
+        )
+        ax.vlines(
+            date_goal,
+            ls=":",
+            lw=2,
+            ymin=0,
+            ymax=1,
+            linewidth=1,
+            color="C5",
+            transform=ax.get_xaxis_transform(),
+        )
+
+        if legend:
+            ax.legend(fontsize="small", loc="upper left", title="Effect schoonmaak")
+
         ylim = ax.get_ylim()
         ax.set_ylim((ylim[1] - (1 + thick) * (ylim[1] - ylim[0]), ylim[1]))
         ax.set_ylabel("Extra capaciteit tgv schoonmaak (m$^3$/h)")
@@ -268,7 +331,7 @@ class strangWeerstand(object):
             y2=thick,
             leiding=True,
             wel=True,
-            # info="",
+            info="Na schoonmaak",
         )
         ax2 = ax.twinx()
         ylim = ax.get_ylim()
@@ -339,14 +402,14 @@ class strangWeerstand(object):
                 yc,
                 info,
                 fontsize=10,
-                backgroundcolor="white",
+                # backgroundcolor="white",
                 va="center",
                 ha="center",
                 transform=transform,
             )
 
         if legend:
-            ax2.legend(fontsize="small", loc="lower left", title="Limieten")
+            ax2.legend(fontsize="small", loc="lower left", title="Limieten", ncol=2)
 
         ax2.set_axis_off()
         return ax

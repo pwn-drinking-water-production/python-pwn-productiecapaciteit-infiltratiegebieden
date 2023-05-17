@@ -6,21 +6,22 @@ Gebuik dit script om de filterweerstandcoefficienten te berekenen.
 import logging
 import os
 
-from strang_analyse_fun2 import smooth
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from strang_analyse_fun2 import (
+from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
-    get_werkzaamheden_intervals,
+    werkzaamheden_dates,
+smooth
 )
 
-from weerstand_pandasaccessors import WellResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
 
-res_folder = os.path.join("Resultaat", "Filterweerstand")
+res_folder = os.path.join("..", "results", "Filterweerstand")
 
 logger_handler = logging.FileHandler(
     os.path.join(res_folder, "Putweerstandcoefficient.log"), mode="w"
@@ -164,8 +165,9 @@ for strang, c in config.iterrows():
     df["dPdQ"] = (df.gws0 - df.gws1) / (df.Q / c.nput)
     df["dPdQ_smooth"] = smooth(df["dPdQ"], days=1)
 
-    werkzh_per = get_werkzaamheden_intervals(df.dPdQ.dropna().index, werkzh_fp, strang)
-    werkzh_datums = np.array([i[0] for i in werkzh_per])
+    dates = werkzaamheden_dates()[strang]
+    dates = dates[dates>df.dPdQ.dropna().index[0]]
+    werkzh_datums = pd.Index(np.concatenate((df.dPdQ.dropna().index[[0]].values, dates)))
 
     Q_avg = df.Q.mean() / c.nput
     slope = c.put_a_slope
@@ -175,6 +177,7 @@ for strang, c in config.iterrows():
 
     # save results
     df_a["gewijzigd"] = pd.Timestamp.now()
+    df_a = df_a.leiding.add_zero_effect_dates(dates)
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
