@@ -171,8 +171,8 @@ df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang:
     #     continue
-    # if strang != 'P200':
-    #     continue
+    if strang != 'P100':
+        continue
 
     # print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))

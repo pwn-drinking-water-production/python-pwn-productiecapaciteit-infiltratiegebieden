@@ -78,6 +78,8 @@ class WellResistanceAccessor:
         return self.a_voor_projectie(datum_projectie) * reductie
 
     def a_model(self, index):
+        index = pd.DatetimeIndex(index)
+
         d_offset = pd.Series(index=index, data=0.0)
         d_slope = pd.Series(index=index, data=0.0)
         d_days_since_wzh = pd.Series(index=index, data=0.0)
@@ -278,6 +280,8 @@ class WvpResistanceAccessor:
         return self._obj.method
 
     def temp_model(self, index):
+        index = pd.DatetimeIndex(index)
+
         if self.method == "sin":
             # temp = delta * sin((t - offset) * 2 * pi / 365) + mean
             year = pd.Categorical(index.year, ordered=True)
@@ -287,7 +291,7 @@ class WvpResistanceAccessor:
             end_year = year.rename_categories(
                 pd.to_datetime(year.categories.astype(str) + "1231", format="%Y%m%d")
             )
-            nday_year = end_year.map(lambda x: x.dayofyear)
+            nday_year = end_year.map(lambda x: x.dayofyear).astype(float)
             dt_year = index - start_year.to_numpy()
             temp_data = (
                 self.temp_delta
@@ -325,6 +329,7 @@ class WvpResistanceAccessor:
 
     def a_model_reftemp(self, index):
         """Weerstand bij referentie temp"""
+        index = pd.DatetimeIndex(index)
         dt = (index - self.offset_datum) / pd.Timedelta("1D")
         a = self.offset + self.slope * dt
         return pd.Series(data=a, index=index, name="wvp_model_a at 12degC")
@@ -430,7 +435,7 @@ class LeidingResistanceAccessor:
         return self.a_voor_projectie(datum_projectie) * reductie
 
     def a_model(self, index):
-        index = pd.Index(index)
+        index = pd.DatetimeIndex(index)
         d_offset = pd.Series(index=index, data=0.0)
         d_slope = pd.Series(index=index, data=0.0)
         d_days_since_wzh = pd.Series(index=index, data=0.0)

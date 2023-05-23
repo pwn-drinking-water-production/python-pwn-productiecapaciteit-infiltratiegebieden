@@ -15,7 +15,7 @@ werkzaamheden_dict = {
     "Q400": [(2017, 8, 10), (2020, 36, 37), (2023, 7, 8)],
     "Q500": [(2015, 43, 44), (2018, 41, 42), (2019, 41, 42), (2023, 4, 5)],
     "Q600": [(2015, 35, 37), (2017, 43, 45), (2021, 43, 44)],
-    "P100": [(2014, 34, 34), (2021, 4, 8)],
+    "P100": [(2014, 34, 34), (2017, 50, 50), (2021, 4, 8)],
     "P200": [(2016, 40, 42), (2018, 44, 45), (2019, 44, 45), (2021, 49, 50)],
     "P300": [(2014, 7, 7), (2015, 45, 47), (2017, 46, 47), (2018, 36, 38), (2019, 36, 38), (2021, 38, 39)],
     "P400": [(2015, 50, 51), (2018, 47, 48), (2019, 47, 48), (2022, 35, 36)],
@@ -36,59 +36,6 @@ werkzaamheden_dict = {
 }
 
 
-# def get_werkzaamheden(werkzh_fp, strang, werkzh_type="proppen", index=None):
-#     werkzh = pd.read_excel(werkzh_fp)
-#
-#     if strang[0] in "PQ":
-#         sq = f"{strang[0]}-{strang[1]}00"
-#     else:
-#         sq = f"{strang[2:-1]}-{strang[-1]}00"
-#
-#     show = werkzh["Omschr. oper."].str.contains(sq)
-#     if werkzh_type is None:
-#         pass
-#     elif werkzh_type == "vacuum":
-#         show &= werkzh["Omschr. oper."].str.contains("Vacuum")
-#     elif werkzh_type == "proppen":
-#         show &= ~werkzh["Omschr. oper."].str.contains("Vacuum")
-#     else:
-#         raise NotImplementedError(f"{werkzh_type} not implemented")
-#
-#     if index is None:
-#         return werkzh[show]
-#
-#     else:
-#         werkzh_dates = werkzh[show]["Vr. eindtermijn"]
-#         werkzh_period = pd.DataFrame(
-#             data={"iper": np.zeros(len(index), dtype=int)}, index=index
-#         )
-#
-#         for i, date in enumerate(werkzh_dates):
-#             werkzh_period["iper"][date:] += 1
-#
-#         uniqarr, counts = np.unique(werkzh_period, return_counts=True)
-#         werkzh_period["iday"] = np.concatenate([range(i) for i in counts]) / (
-#             timedelta(days=1) / (index[1] - index[0])
-#         )
-#
-#         return werkzh[show], werkzh_period
-#
-#
-# def get_werkzaamheden_intervals(index, werkzh_fp, strang):
-#     werkzh = get_werkzaamheden(
-#         werkzh_fp=werkzh_fp, strang=strang, werkzh_type="proppen"
-#     )
-#
-#     werkzh_dates = werkzh["Vrgste startd."] + (werkzh["Vr. eindtermijn"] - werkzh["Vrgste startd."]) / 2
-#     start = index[0].to_numpy()
-#     end = index[-1].to_numpy()
-#     werkzh_dates = werkzh_dates[np.logical_and(werkzh_dates >= start, werkzh_dates <= end)]
-#     werkzh_per = list(zip(np.concatenate(([start], werkzh_dates)),
-#                           np.concatenate((werkzh_dates, [end]))))
-#     return werkzh_per
-
-
-
 def werkzaamheden_dates():
     def yr_wk_to_date(year, wk_start, wk_end):
         date_start = datetime.strptime(f"{year}-W{wk_start}-3", "%G-W%V-%u")
@@ -96,7 +43,7 @@ def werkzaamheden_dates():
         date_avg = date_start + (date_end - date_start) / 2
         return date_avg
 
-    d = {k: pd.Index([yr_wk_to_date(*vv) for vv in v]) for k, v in werkzaamheden_dict.items()}
+    d = {k: pd.DatetimeIndex([yr_wk_to_date(*vv) for vv in v]) for k, v in werkzaamheden_dict.items()}
     return d
 
 
@@ -116,14 +63,19 @@ def remove_per_from_werkzh_per(werkzh_per, idrop):
 
 
 def get_rule_tijdens_proppen(d, c):
-    werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
-    werkzh = get_werkzaamheden(werkzh_fp, c.name, werkzh_type="proppen")
+    def yr_wk_to_date(year, wk_start, wk_end):
+        date_start = datetime.strptime(f"{year}-W{wk_start}-1", "%G-W%V-%u")
+        date_end = datetime.strptime(f"{year}-W{wk_end}-7", "%G-W%V-%u")
+        return date_start, date_end
+
+    start_end = [yr_wk_to_date(*vv) for vv in werkzaamheden_dict[c.name]]
 
     tijdens_proppen = np.zeros_like(d.index, dtype=bool)
 
-    for i, start, end in werkzh[["Vrgste startd.", "Vr. eindtermijn"]].itertuples():
+    for start, end in start_end:
         end2 = start + 1.25 * (end - start)
-        tijdens_proppen[(d.index >= start) & (d.index < end2)] = True
+        start2 = end - 1.25 * (end - start)
+        tijdens_proppen[(d.index >= start2) & (d.index < end2)] = True
 
     return tijdens_proppen
 

@@ -107,6 +107,7 @@ class strangWeerstand(object):
         return (self.hluchthappen - self.hpand) / (a_wvp + a_filter)
 
     def lim_verblijf(self, index):
+        index = pd.DatetimeIndex(index)
         return pd.Series(data=self.nput * self.Qlim_bio_per_put, index=index)
 
     def lims(self, index):
@@ -116,7 +117,8 @@ class strangWeerstand(object):
                 "Vacuumsysteem": self.lim_vac(index),
                 "Luchthappen": self.lim_luchthap(index),
                 "Verblijftijd": self.lim_verblijf(index),
-            }
+            },
+            index=pd.DatetimeIndex(index)
         )
 
     def lim_flow_min(self, index, deltah_veilig=1.5):
@@ -165,6 +167,40 @@ class strangWeerstand(object):
         )
 
         return cap_na_schoonmaak - self.capaciteit(date_test)
+
+    def report_capaciteit_effect_schoonmaak(
+        self, date_clean, date_goal
+    ):
+        """
+        Investigate the effect a schoonmaak on date `date_clean` on the capacity on date `date_goal`.
+        """
+        effect_leiding = self.capaciteit_effect_schoonmaak(
+            date_clean, date_goal, leiding=True, wel=False
+        )
+        effect_wel = self.capaciteit_effect_schoonmaak(
+            date_clean, date_goal, leiding=False, wel=True
+        )
+        effect_som = self.capaciteit_effect_schoonmaak(
+            date_clean, date_goal, leiding=True, wel=True
+        )
+
+        # grove schatting van contributie van schoonmaak leidingen/putten
+        # Leidingweerstanden gaan kwadratisch en tellen dus niet lekker op
+        # strang_leiding + strang_wel != strang_som
+        ratio_lei = effect_leiding / (effect_leiding + effect_wel)
+        ratio_wel = effect_wel / (effect_leiding + effect_wel)
+        frac_lei = ratio_lei * effect_som
+        frac_wel = ratio_wel * effect_som
+        out = {
+            "leiding": effect_leiding,
+            "wel": effect_wel,
+            "som": effect_som,
+            "ratio_wel": ratio_wel,
+            "ratio_lei": ratio_lei,
+            "frac_wel": frac_wel,
+            "frac_lei": frac_lei
+        }
+        return effect_som, out
 
     def capaciteit_effect_schoonmaak_cat(
         self, date_clean, date_test, leiding=True, wel=True
@@ -264,30 +300,16 @@ class strangWeerstand(object):
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(10, 5), gridspec_kw=gridspec_kw)
 
-        effect_leiding = self.capaciteit_effect_schoonmaak(
-            date_clean, date_test, leiding=True, wel=False
-        )
-        effect_wel = self.capaciteit_effect_schoonmaak(
-            date_clean, date_test, leiding=False, wel=True
-        )
-        effect_som = self.capaciteit_effect_schoonmaak(
-            date_clean, date_test, leiding=True, wel=True
-        )
+        effect_som, effect_dict = self.report_capaciteit_effect_schoonmaak(date_clean, date_test)
 
-        # grove schatting van contributie van schoonmaak leidingen/putten
-        # Leidingweerstanden gaan kwadratisch en tellen dus niet lekker op
-        # strang_leiding + strang_wel != strang_som
-        frac_lei = effect_leiding / (effect_leiding + effect_wel) * effect_som
-        frac_wel = effect_wel / (effect_leiding + effect_wel) * effect_som
-
-        ax.fill_between(date_test, y1=frac_lei, y2=y0, label="Leiding")
-        ax.fill_between(date_test, y1=effect_som, y2=frac_lei, label="Put")
+        ax.fill_between(date_test, y1=effect_dict["frac_lei"], y2=y0, label="Leiding")
+        ax.fill_between(date_test, y1=effect_som, y2=effect_dict["frac_lei"], label="Put")
         ax.plot(date_test, effect_som, c="black", lw=0.8, label="")
 
         self.plot_schoonmaak(ax, [date_clean], label="Schoonmaak moment")
         self.plot_schoonmaak(ax, self.get_schoonmaak_dates(), label="")
 
-        string = date_goal.strftime(f"%Y-%m-%d: {effect_som[date_goal]:.0f} m$^3$/d extra")
+        string = date_goal.strftime(f"%Y-%m-%d: {effect_som[date_goal]:.0f} m$^3$/h extra")
         transform = ax.get_xaxis_transform()
         ax.text(
             date_goal,

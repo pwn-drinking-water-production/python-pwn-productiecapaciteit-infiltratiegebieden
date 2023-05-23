@@ -9,26 +9,6 @@ from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceA
 from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
 from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor
 
-res_folder = os.path.join("..", "results", "Synthese")
-logger_handler = logging.FileHandler(
-    os.path.join(res_folder, "Capaciteit_analyse.log"), mode="w"
-)  # , encoding='utf-8', level=logging.DEBUG)
-stdout = logging.StreamHandler()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logger_handler, stdout],
-)
-
-gridspec_kw = {
-    "left": 0.07,
-    "bottom": 0.12,
-    "right": 0.92,
-    "top": 0.88,
-    "wspace": 0.2,
-    "hspace": 0.2,
-}
-
 data_fd = os.path.join("..", "data")
 config_fn = "strang_props6.xlsx"
 config = get_config(os.path.join(data_fd, config_fn))
@@ -44,13 +24,16 @@ wvpweerstand_fp = os.path.join(
     "..", "results", "Wvpweerstand", "Wvpweerstand_modelcoefficienten.xlsx"
 )
 
-index = pd.date_range("2012-05-01", "2025-12-31")
 date_goal = pd.Timestamp("2024-07-01")
+date_clean = "2023-11-01"
+index = pd.date_range("2012-05-01", date_clean)
 
+som_dict = dict()
+report = dict()
 
 for strang, c in config.iterrows():
-    if strang != "P100":
-        continue
+    # if strang != "IK91":
+    #     continue
 
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
     df_a_leiding = pd.read_excel(leidingweerstand_fp, sheet_name=strang)
@@ -59,18 +42,30 @@ for strang, c in config.iterrows():
     )
 
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
-    date_clean = "2023-11-01"
-    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw=gridspec_kw)
-    fig.suptitle(
-        f"{strang}: Capaciteit met geplande schoonmaak putten en leiding op {pd.Timestamp(date_clean).strftime('%d-%m-%Y')}\n"
-        f""
-    )
+    effect_som, effect_dict = weerstand.report_capaciteit_effect_schoonmaak(date_clean, [date_goal])
+    frac = effect_dict["ratio_lei"].item()
+    cap_min = weerstand.capaciteit(index).min()
 
-    weerstand.plot_lims(index, date_clean, ax=ax0)
-    weerstand.plot_capaciteit_effect_schoonmaak(date_clean, index, date_goal, ax=ax1)
+    lims = weerstand.lims([date_clean]).iloc[0]
+    cap = lims.min()
+    # Maak een lijst van alle limieten die dicht bij de capaciteit liggen.
+    lim_cats = lims[lims < cap * 1.1].index
 
-    fig_path = os.path.join(res_folder, f"Capaciteit - {strang}.png")
-    fig.savefig(fig_path, dpi=300)
-    logging.info(f"Saved capaciteit result to {fig_path}")
+    lims_schoonmaak = weerstand.lims_schoonmaak(date_clean, [date_goal], leiding=True, wel=True).iloc[0]
+    cap_schoonmaak = lims_schoonmaak.min()
+    lim_cats_schoonmaak = lims_schoonmaak[lims_schoonmaak < cap_schoonmaak * 1.1].index
 
+    if effect_som.item() / cap_min > 0.025:
+        if frac > 0.1 and frac < 0.9:
+            welke = "Leiding en filter"
+
+        elif frac > 0.1:
+            welke = "Leiding"
+
+        elif frac < 0.9:
+            welke = "Filter"
+
+        print(f"{strang}\t{effect_som.item():.0f}\t{welke}\t{', '.join(lim_cats)}\t{', '.join(lim_cats_schoonmaak)}")
+    else:
+        print(f"{strang}\tNIHIL\t-\t{', '.join(lim_cats)}\t-")
 print("hoi")

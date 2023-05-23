@@ -7,16 +7,16 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from strang_analyse_fun2 import (
+from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
 )
 
-from productiecapaciteit import LeidingResistanceAccessor
-from productiecapaciteit import WellResistanceAccessor
-from productiecapaciteit import WvpResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors  import LeidingResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors  import WellResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors  import WvpResistanceAccessor
 
-res_folder = os.path.join("Resultaat", "Wvpweerstand")
+res_folder = os.path.join("..", "results", "Wvpweerstand")
 logger_handler = logging.FileHandler(
     os.path.join(res_folder, "Wvpweerstandcoefficient.log"), mode="w"
 )  # , encoding='utf-8', level=logging.DEBUG)
@@ -135,8 +135,6 @@ def get_wvp_slope_per_year2(index, flow, dp, offset_datum, temp_wvp):
 
 temp_ref = 12.0
 
-fig_folder = os.path.join("Resultaat")
-
 data_fd = os.path.join("..", "Data")
 config_fn = "strang_props6.xlsx"
 config = get_config(os.path.join(data_fd, config_fn))
@@ -150,10 +148,10 @@ gridspec_kw = {
 }
 
 filterweerstand_fp = os.path.join(
-    "Resultaat", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx"
+    "..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx"
 )
 leidingweerstand_fp = os.path.join(
-    "Resultaat", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx"
+    "..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx"
 )
 
 werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
