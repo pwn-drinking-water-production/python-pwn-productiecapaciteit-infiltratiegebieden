@@ -4,6 +4,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from productiecapaciteit.src.capaciteit_strang import strangWeerstand
 from productiecapaciteit.src.capaciteit_strang import get_config
+import numpy as np
+
+from productiecapaciteit.src.strang_analyse_fun2 import (
+    get_config,
+    get_false_measurements,
+)
 
 from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
 from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
@@ -32,7 +38,7 @@ flow_dict = dict()
 report = dict()
 
 for strang, c in config.iterrows():
-    # if strang != "IK91":
+    # if strang != "IK105":
     #     continue
 
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
@@ -44,7 +50,7 @@ for strang, c in config.iterrows():
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
     flow_mean = weerstand.capaciteit(index).median()
 
-    deltah_veilig=1.5
+    deltah_veilig = 1.5
     flow_min = weerstand.lim_flow_min(index, deltah_veilig=deltah_veilig)
     cap = weerstand.capaciteit(index)
     print(
@@ -59,5 +65,21 @@ for strang, c in config.iterrows():
         f"{cap.min():0.0f}\t"
         f"{weerstand.Qmax_inzetvolgorde20230523 * weerstand.nput:.0f}\t"
         )
+
+    # df_fp = os.path.join(data_fd, "Merged", f"{strang}-PKA-DSEW036680.feather")
+    # df = pd.read_feather(df_fp)
+    # df["Datum"] = pd.to_datetime(df["Datum"])
+    # df.set_index("Datum", inplace=True)
+    # df = df.resample("1H").mean()
+    #
+    # # include_rules = ["Unrealistic flow", "Niet 1-day steady"]
+    # include_rules = ["Unrealistic flow"]
+    # untrusted_measurements = get_false_measurements(
+    #     df, c, extend_hours=1, include_rules=include_rules
+    # )
+    # df.loc[untrusted_measurements] = np.nan
+
+
+
 # Qmax_inzetvolgorde20230523
 print("hoi")

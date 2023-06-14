@@ -49,8 +49,8 @@ date_goal = pd.Timestamp("2024-07-01")
 
 
 for strang, c in config.iterrows():
-    if strang != "P100":
-        continue
+    # if strang != "IK95":
+    #     continue
 
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
     df_a_leiding = pd.read_excel(leidingweerstand_fp, sheet_name=strang)

@@ -274,6 +274,7 @@ def get_knmi_bodemtemperature(fn):
 
 def get_config(fn):
     config = pd.read_excel(fn).set_index("Unnamed: 0").T
+    config = config.loc[:, config.columns.notna()]
     return config
 
 

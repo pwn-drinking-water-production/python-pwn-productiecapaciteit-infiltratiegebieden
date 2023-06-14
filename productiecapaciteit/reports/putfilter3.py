@@ -141,7 +141,7 @@ df_a_fp = os.path.join(res_folder, "Filterweerstand_modelcoefficienten.xlsx")
 
 
 for strang, c in config.iterrows():
-    if strang != "P100":
+    if strang != "IK105":
         continue
 
     print(strang)

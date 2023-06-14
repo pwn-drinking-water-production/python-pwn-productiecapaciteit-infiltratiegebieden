@@ -72,8 +72,8 @@ class WellResistanceAccessor:
             if self.a_effect.size > 1:
                 reductie = np.nanmean(self.a_effect[1:])
             else:
-                print("Geen schoonmaken die putweerstand doen afnemen")
-                reductie = np.nan
+                print("Geen schoonmaken die putweerstand doen afnemen => geen voorspelde reductie")
+                reductie = 1.
 
         return self.a_voor_projectie(datum_projectie) * reductie
 
@@ -429,8 +429,8 @@ class LeidingResistanceAccessor:
             if self.a_effect.size > 1:
                 reductie = np.nanmean(self.a_effect[1:])
             else:
-                print("Geen schoonmaken die leidingweerstand doen afnemen")
-                reductie = np.nan
+                print("Geen schoonmaken die leidingweerstand doen afnemen => geen voorspelde reductie")
+                reductie = 1.
 
         return self.a_voor_projectie(datum_projectie) * reductie
 
