@@ -38,9 +38,9 @@ class strangWeerstand(object):
         **kwargs,
     ):
         self.__dict__.update(kwargs)
-        self._df_leiding = df_a_leiding
-        self._df_filter = df_a_filter
-        self._df_wvp = df_a_wvp
+        self._df_leiding = df_a_leiding.copy()
+        self._df_filter = df_a_filter.copy()
+        self._df_wvp = df_a_wvp.copy()
         self.druk_limiet = druk_limiet  # onderdruk vacuumsysteem
         self.temp_opwarming = temp_opwarming
         self.test_dates = {
