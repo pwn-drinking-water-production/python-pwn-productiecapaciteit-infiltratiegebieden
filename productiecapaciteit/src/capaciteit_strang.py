@@ -1,4 +1,5 @@
 from datetime import timedelta, datetime
+from pprint import pformat
 from copy import deepcopy
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -8,7 +9,7 @@ import pandas as pd
 from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
 from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
 from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor
-
+from productiecapaciteit.src.strang_analyse_fun2 import visc_ratio
 
 gridspec_kw = {
     "left": 0.07,
@@ -33,6 +34,7 @@ class strangWeerstand(object):
         df_a_filter,
         df_a_wvp,
         druk_limiet=-7.5,
+        temp_opwarming=None,
         **kwargs,
     ):
         self.__dict__.update(kwargs)
@@ -40,11 +42,45 @@ class strangWeerstand(object):
         self._df_filter = df_a_filter
         self._df_wvp = df_a_wvp
         self.druk_limiet = druk_limiet  # onderdruk vacuumsysteem
+        self.temp_opwarming = temp_opwarming
         self.test_dates = {
             # 'test2009': datetime(2009, 8, 18),
             "test2015": datetime(2015, 6, 30),
             "test2021": datetime(2021, 6, 14),
         }
+
+        if self.temp_opwarming is not None:
+            # visc_ratio(15, temp_ref=8) = 0.82
+            mean_temp = self._df_wvp.temp_mean
+            mean_temp_new = mean_temp + temp_opwarming
+            ratio = visc_ratio(mean_temp_new, temp_ref=mean_temp)
+
+            # adjust filter
+            self._df_filter.offset *= ratio
+            self._df_filter.slope *= ratio
+
+            # adjust wvp
+            self._df_wvp.temp_mean += temp_opwarming
+
+    def __repr__(self, width=100):
+        s = list()
+
+        sorted_dict = dict(sorted(self.__dict__.items()))
+        for k in ["_df_leiding", "_df_filter", "_df_wvp"]:
+            si = f"MODEL CONFIG: {k.split('_')[-1]}\n"
+            si += pformat(self.__dict__[k], width=width)
+            s.append(si)
+            del sorted_dict[k]
+
+        s.append("PARAMETERS:\n" + pformat(sorted_dict, width=width))
+
+        object_methods = [method_name for method_name in dir(self)
+                          if callable(getattr(self, method_name))
+                          and method_name[0] != "_"]
+        si = "METHODS:\n - " + "\n - ".join(object_methods)
+        s.append(si)
+
+        return ("\n" + width * "-" + "\n").join(s)
 
     @property
     def lei(self):

@@ -401,6 +401,7 @@ def prepare_strang_data(plenty_path, fp_out, config):
 
 
 def visc_ratio(temp, temp_ref=10.0):
+    # visc_ratio(15, temp_ref=8) = 0.82
     visc_ref = (
         1 + 0.0155 * (temp_ref - 20.0)
     ) ** -1.572  # / 1000  removed the division because we re taking a ratio.
