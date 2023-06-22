@@ -147,8 +147,8 @@ class strangWeerstand(object):
         index = pd.DatetimeIndex(index)
         return pd.Series(data=self.nput * self.Qlim_bio_per_put, index=index)
 
-    def lims(self, index):
-        return pd.DataFrame(
+    def lims(self, index, use_lims=None):
+        out = pd.DataFrame(
             {
                 "Pompcapaciteit": self.Qpomp,
                 "Vacuumsysteem": self.lim_vac(index),
@@ -157,6 +157,8 @@ class strangWeerstand(object):
             },
             index=pd.DatetimeIndex(index)
         )
+        use_lims = out.columns if use_lims is None else use_lims
+        return out[use_lims]
 
     def lim_flow_min(self, index, deltah_veilig=1.5):
         a_wvp = self.wvp.wvp.a_model(index)
@@ -168,11 +170,11 @@ class strangWeerstand(object):
         strang2 = self.get_schoonmaakscenario(date_clean, leiding=leiding, wel=wel)
         return strang2.lim_flow_min(index, deltah_veilig=1.5)
 
-    def capaciteit(self, index):
-        return self.lims(index).min(axis=1)
+    def capaciteit(self, index, use_lims=None):
+        return self.lims(index, use_lims=use_lims).min(axis=1)
 
-    def capaciteit_cat(self, index):
-        lims = self.lims(index)
+    def capaciteit_cat(self, index, use_lims=None):
+        lims = self.lims(index, use_lims=use_lims)
         values = lims.idxmin(axis=1)
         categories = lims.columns
 

@@ -130,7 +130,7 @@ config = get_config(os.path.join(data_fd, config_fn))
 gridspec_kw = {
     "left": 0.07,
     "bottom": 0.12,
-    "right": 0.94,
+    "right": 0.9,
     "top": 0.88,
     "wspace": 0.2,
     "hspace": 0.2,
@@ -141,8 +141,8 @@ df_a_fp = os.path.join(res_folder, "Filterweerstand_modelcoefficienten.xlsx")
 
 
 for strang, c in config.iterrows():
-    if strang != "IK105":
-        continue
+    # if strang != "IK105":
+    #     continue
 
     print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
@@ -181,7 +181,9 @@ for strang, c in config.iterrows():
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 5), gridspec_kw=gridspec_kw)
+    plt.style.use(['unhcrpyplotstyle', 'line'])
+    fig, ax2 = plt.subplots(1, 1, figsize=(12, 5), gridspec_kw=gridspec_kw)
+    ax = ax2.twinx()
     fig.suptitle(strang)
     ax.axhline(0, c="black", lw="0.8")
     df_a.leiding.plot_werkzh(ax, werkzh_datums)
@@ -192,10 +194,13 @@ for strang, c in config.iterrows():
     )
     ax.set_ylabel("Weerstand: Verlaging bij Q = 1 m3/h (m)")
     ax.set_ylim(-4 / Q_avg, 1 / Q_avg)
-    ax.legend(fontsize="small")
+    ax.set_yticks(np.arange(-4, 2) / Q_avg)
+    # ax.set_xlim(df.index[[0, -1]])
+    # ax.legend(fontsize="small")
+    ax.legend(loc=(0, 1), ncol=4)
 
-    ax2 = ax.twinx()
-    ax2.set_ylim(Q_avg * np.array(ax.get_ylim()))
+    ax2.set_ylim((-4, 1))
+    ax2.set_yticks(np.arange(-4, 2))
     ax2.set_xlim(df.index[[0, -1]])
     ax2.set_ylabel(f"Verlaging bij Q_put={Q_avg:.1f}m3/h (m)")
 

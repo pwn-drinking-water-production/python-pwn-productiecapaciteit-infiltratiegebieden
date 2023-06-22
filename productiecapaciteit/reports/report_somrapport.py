@@ -59,7 +59,7 @@ plt.savefig(fig_path, dpi=300)
 """
 Effect opwarming
 """
-plt.style.use(['unhcrpyplotstyle', 'streamgraph'])
+plt.style.use(['unhcrpyplotstyle', 'line'])
 res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
 
 lims_sum_dict = dict()
@@ -75,9 +75,8 @@ dlims_sum = lims_sum - lims_sum[[0]].values
 dlims_sum_frac = dlims_sum / lims_sum[[0]].values * 100
 
 
-
-fig, ax = plt.subplots(figsize=(7.7, 5.75))
-ax.set_title('Effect van opwarming watervoerendpakket op productiecap.\n2012-2022', pad=30)
+fig, ax = plt.subplots(figsize=(8.5, 5.75))
+ax.set_title('Effect van opwarming watervoerendpakket op productiecap.\n2012-2022', pad=40)
 dlims_sum_frac.rename(columns={k: f"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
 ax.legend(loc=(0, 1), ncol=7)
 ax.set_ylabel('Toename in productiecap. (%)')
@@ -85,5 +84,68 @@ fig.tight_layout()
 
 fig_path = os.path.join(res_folder, f"Effect opwarming.png")
 fig.savefig(fig_path, dpi=300)
+
+
+"""
+Effect opwarming zoom
+"""
+plt.style.use(['unhcrpyplotstyle', 'line'])
+res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
+
+lims_sum_dict = dict()
+lims_offset = dict()
+for temp_opwarming, wi in w_offset.items():
+    lims = pd.DataFrame({k: v.capaciteit(index) for k, v in wi.items()})
+    lims_offset[temp_opwarming] = lims
+
+    lims_sum_dict[temp_opwarming] = lims.sum(axis=1)
+
+lims_sum = pd.DataFrame(lims_sum_dict)
+dlims_sum = lims_sum - lims_sum[[0]].values
+dlims_sum_frac = dlims_sum / lims_sum[[0]].values * 100
+
+
+fig, ax = plt.subplots(figsize=(8.5, 5.75))
+ax.set_title('Effect van opwarming watervoerendpakket op productiecap.\n2021', pad=40)
+dlims_sum_frac.rename(columns={k: f"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
+ax.legend(loc=(0, 1), ncol=7)
+ax.set_ylabel('Toename in productiecap. (%)')
+ax.set_xlim(("2021-01-01", "2022-01-01"))
+fig.tight_layout()
+
+fig_path = os.path.join(res_folder, f"Effect opwarming zoom.png")
+fig.savefig(fig_path, dpi=300)
+
+
+"""
+Effect opwarming zoom
+"""
+plt.style.use(['unhcrpyplotstyle', 'line'])
+res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
+
+lims_sum_dict = dict()
+lims_offset = dict()
+for temp_opwarming, wi in w_offset.items():
+    lims = pd.DataFrame({k: v.capaciteit(index) for k, v in wi.items()})
+    lims_offset[temp_opwarming] = lims
+
+    lims_sum_dict[temp_opwarming] = lims.sum(axis=1)
+
+lims_sum = pd.DataFrame(lims_sum_dict)
+dlims_sum = lims_sum - lims_sum[[0]].values
+dlims_sum_frac = dlims_sum / lims_sum[[0]].values * 100
+
+
+fig, ax = plt.subplots(figsize=(8.5, 5.75))
+ax.set_title('Effect van opwarming watervoerendpakket op productiecap.\n2021', pad=40)
+dlims_sum_frac.rename(columns={k: f"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
+ax.legend(loc=(0, 1), ncol=7)
+ax.set_ylabel('Toename in productiecap. (%)')
+ax.set_xlim(("2021-01-01", "2022-01-01"))
+fig.tight_layout()
+
+fig_path = os.path.join(res_folder, f"Effect opwarming zoom - geen pomplimiet.png")
+fig.savefig(fig_path, dpi=300)
+
 
 print("hoi")

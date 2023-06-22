@@ -3,6 +3,7 @@ import os
 from datetime import timedelta
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
@@ -209,48 +210,45 @@ for strang, c in config.iterrows():
     df_a = get_wvp_slope_per_year2(df.index, df.Q, df.dP_wvp2, df.index[0], df.T_bodem)
 
     # measured dp
-    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
+    plt.style.use(['unhcrpyplotstyle', 'line'])
+    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 9), sharex=True, sharey=True, gridspec_kw=gridspec_kw)
     ax0.plot(
         df.index,
-        df_a.wvp.dp_model(df.index, df.Q, df.T_bodem),
+        -df_a.wvp.dp_model(df.index, df.Q),
         c="C1",
-        label="Model met gemeten temp_wvp",
-        lw=0.8,
-    )
-    ax0.plot(
-        df.index,
-        df_a.wvp.dp_model(df.index, df.Q),
-        c="C2",
         label="Model met sinus temp_wvp",
         lw=0.8,
     )
-    ax0.plot(df.index, df.dP_wvp2, c="C0", label="Gemeten")
-    ax0.legend(fontsize="small")
+    ax0.plot(df.index, -df.dP_wvp2, c="C0", label="Gemeten")
+    # ax0.legend(fontsize="small")
+    ax0.legend(loc=(0, 1), ncol=2)
     ax0.set_ylabel(f"Drukverlies wvp bij gemeten Q (m)")
+    ax0.xaxis.set_major_locator(mdates.YearLocator())
+    ax0.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax0.xaxis.get_major_locator()))
     Q_avg = df.Q.median()
     std = (
         df_a.wvp.dp_model(df.index, Q_avg, df.T_bodem) - df.dP_wvp2 / df.Q * Q_avg
     ).std()
-    ax1.plot(
-        df.index,
-        df_a.wvp.dp_model(df.index, Q_avg, df.T_bodem),
-        c="C1",
-        label=f"Model met gemeten temp_wvp (std={std:.2f}m)",
-        lw=0.8,
-    )
     model_std = (df_a.wvp.dp_model(df.index, Q_avg) - df.dP_wvp2 / df.Q * Q_avg).std()
     df_a["model_std"] = model_std
+
     ax1.plot(
         df.index,
-        df_a.wvp.dp_model(df.index, Q_avg),
-        c="C2",
+        -df_a.wvp.dp_model(df.index, Q_avg),
+        c="C1",
         label=f"Model met sinus temp_wvp (std={model_std:.2f}m)",
         lw=0.8,
     )
-    ax1.plot(df.index, df.dP_wvp2 / df.Q * Q_avg, c="C0", label="Gemeten (std=0m)")
-    ax1.legend(fontsize="small")
+    ax1.plot(df.index, -df.dP_wvp2 / df.Q * Q_avg, c="C0", label="Gemeten (std=0m)")
+    # ax1.legend(fontsize="small")
+    ax1.legend(loc=(0, 1), ncol=2)
     ax1.set_ylabel(f"Drukverlies wvp bij Q={Q_avg:.0f}m3/h (m)")
+    ax1.xaxis.set_major_locator(mdates.YearLocator())
+    ax1.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator()))
 
+    fig.tight_layout()
     fig_path = os.path.join(res_folder, f"Wvpweerstandcoefficient - {strang}.png")
     fig.savefig(fig_path, dpi=300)
     logging.info(f"Saved result to {fig_path}")

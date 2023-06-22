@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import pandas as pd
 from productiecapaciteit.src.capaciteit_strang import strangWeerstand
-from productiecapaciteit.src.capaciteit_strang import get_config
+from productiecapaciteit.src.strang_analyse_fun2 import get_config
 
 from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
 from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
@@ -60,6 +60,7 @@ for strang, c in config.iterrows():
 
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
     date_clean = "2023-11-01"
+
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw=gridspec_kw)
     fig.suptitle(
         f"{strang}: Capaciteit met geplande schoonmaak putten en leiding op {pd.Timestamp(date_clean).strftime('%d-%m-%Y')}\n"

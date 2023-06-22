@@ -161,8 +161,8 @@ gridspec_kw = {
     "bottom": 0.12,
     "right": 0.94,
     "top": 0.88,
-    "wspace": 0.2,
-    "hspace": 0.2,
+    "wspace": 0.3,
+    "hspace": 0.3,
 }
 
 werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
@@ -171,8 +171,8 @@ df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang:
     #     continue
-    if strang != 'P100':
-        continue
+    # if strang != 'P100':
+    #     continue
 
     # print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
@@ -225,6 +225,7 @@ for strang, c in config.iterrows():
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
+    plt.style.use(['unhcrpyplotstyle', 'line'])
     fig, (ax, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
     fig.suptitle(strang)
 
@@ -238,7 +239,8 @@ for strang, c in config.iterrows():
     ax.set_ylabel("Verlaging bij Q = 1 m3/h (m)")
     ax.set_ylim(-4 / Q_avg**2, 1 / Q_avg**2)
     ax.set_xlim(df.index[[0, -1]])
-    ax.legend(fontsize="small")
+    # ax.legend(fontsize="small")
+    ax.legend(loc=(0.05, 1), ncol=4)
 
     # Gemeten en gemodelleerde verlaging bij gemeten debiet
     ax2.axhline(0, c="black", lw="0.8")
@@ -254,7 +256,8 @@ for strang, c in config.iterrows():
     ax2.set_ylim(-4, 1)
     ax2.set_xlim(df.index[[0, -1]])
     ax2.set_ylabel(f"Verlaging bij gemeten Q (m)")
-    ax2.legend(fontsize="small")
+    # ax2.legend(fontsize="small")
+    ax2.legend(loc=(0, 1), ncol=4)
 
     # Gemeten en gemodelleerde verlaging bij gem debiet
     ax3.axhline(0, c="black", lw="0.8")
@@ -273,7 +276,8 @@ for strang, c in config.iterrows():
     ax3.set_ylim(-4, 1)
     ax3.set_xlim(df.index[[0, -1]])
     ax3.set_ylabel(f"Verlaging bij Q={Q_avg:.0f} m3/h (m)")
-    ax3.legend(fontsize="small")
+    # ax3.legend(fontsize="small")
+    ax3.legend(loc=(0, 1), ncol=4)
 
     fig_path = os.path.join(res_folder, f"Leidingweerstandcoefficient - {strang}.png")
     fig.savefig(fig_path, dpi=300)
