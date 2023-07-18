@@ -118,15 +118,24 @@ fig.savefig(fig_path, dpi=300)
 
 
 """
-Effect opwarming zoom
+Effect opwarming zoom except pompcapaciteit
+
+            {
+                "Pompcapaciteit": self.Qpomp,
+                "Vacuumsysteem": self.lim_vac(index),
+                "Luchthappen": self.lim_luchthap(index),
+                "Verblijftijd": self.lim_verblijf(index),
+            }
+            
 """
 plt.style.use(['unhcrpyplotstyle', 'line'])
 res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
+use_lims = ["Vacuumsysteem", "Luchthappen", "Verblijftijd"]
 
 lims_sum_dict = dict()
 lims_offset = dict()
 for temp_opwarming, wi in w_offset.items():
-    lims = pd.DataFrame({k: v.capaciteit(index) for k, v in wi.items()})
+    lims = pd.DataFrame({k: v.capaciteit(index, use_lims=use_lims) for k, v in wi.items()})
     lims_offset[temp_opwarming] = lims
 
     lims_sum_dict[temp_opwarming] = lims.sum(axis=1)
