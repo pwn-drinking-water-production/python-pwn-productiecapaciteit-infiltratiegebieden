@@ -20,10 +20,10 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
 
 from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
 
-res_folder = os.path.join("..", "results", "Leidingweerstand")
+res_folder = os.path.abspath(os.path.join(__file__, "..", "..", "results", "Leidingweerstand"))
 logger_handler = logging.FileHandler(
     os.path.join(res_folder, "Leidingweerstandcoefficient.log"), mode="w"
-)  # , encoding='utf-8', level=logging.DEBUG)
+)  # , encoding='utf-8', level=logging.DEBUG) res_folder, 
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
@@ -153,7 +153,7 @@ temp_ref = 12.0
 
 fig_folder = os.path.join("Resultaat")
 
-data_fd = os.path.join("..", "Data")
+data_fd = os.path.abspath(os.path.join(__file__, "..", "..", "data"))
 config_fn = "strang_props6.xlsx"
 config = get_config(os.path.join(data_fd, config_fn))
 gridspec_kw = {
@@ -165,7 +165,7 @@ gridspec_kw = {
     "hspace": 0.3,
 }
 
-werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
+werkzh_fp = os.path.join(data_fd, "Werkzaamheden.xlsx")
 df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 
 for strang, c in config.iterrows():
