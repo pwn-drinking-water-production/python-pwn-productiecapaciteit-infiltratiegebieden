@@ -18,9 +18,9 @@ import pandas as pd
 from data_functions import get_knmi_bodemtemperature
 from data_functions import prepare_strang_data
 from data_functions import read_plenty_excel
-from productiecapaciteit import get_config
+from productiecapaciteit.src.strang_analyse_fun2 import get_config
 
-data_fd = os.path.join("..", "Data")
+data_fd = os.path.join(__file__, "..")
 config_fn = "strang_props6.xlsx"
 config = get_config(os.path.join(data_fd, config_fn))
 
@@ -35,13 +35,13 @@ fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_ICAS sec P")
 fp_out = os.path.join(data_fd, "Plenty", "P.feather")
 prepare_strang_data(fp_in, fp_out, config)
 
-fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_IKIEF sec 09")
-fp_out = os.path.join(data_fd, "Plenty", "09.feather")
-prepare_strang_data(fp_in, fp_out, config)
+# fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_IKIEF sec 09")
+# fp_out = os.path.join(data_fd, "Plenty", "09.feather")
+# prepare_strang_data(fp_in, fp_out, config)
 
-fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_IKIEF sec 10")
-fp_out = os.path.join(data_fd, "Plenty", "10.feather")
-prepare_strang_data(fp_in, fp_out, config)
+# fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_IKIEF sec 10")
+# fp_out = os.path.join(data_fd, "Plenty", "10.feather")
+# prepare_strang_data(fp_in, fp_out, config)
 
 infil_temp = dw.get_daw_ts_temp(
     mpcode="19CZL5132", filternr=1
@@ -51,8 +51,9 @@ pandpeil_fp = os.path.join(data_fd, "Plenty", "PREP2XL_v122_pandpeilen")
 pandpeil = read_plenty_excel(pandpeil_fp)
 
 for strang, c in config.iterrows():
-    # if strang != "IK105":
-    #     continue
+    if "IK" in strang:
+        continue
+    print(strang)
 
     if "Q" in strang:
         fp_out = os.path.join(data_fd, "Plenty", "Q.feather")

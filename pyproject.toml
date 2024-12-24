@@ -17,7 +17,7 @@ maintainers = [
 ]
 requires-python = ">= 3.8"
 dependencies = [
-    "pandas<2.0",
+    "pandas",
     "pyarrow",
     "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git",
     "unhcrpyplotstyle @ git+https://github.com/leichen88/unhcrpyplotstyle.git",

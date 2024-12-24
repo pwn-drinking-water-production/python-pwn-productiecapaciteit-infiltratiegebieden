@@ -60,9 +60,11 @@ def prepare_strang_data(plenty_path, fp_out, config):
             if f"{c.PA_tag_prefix}_OP20" not in plenty_data:
                 continue
 
-        filters = dw.get_daw_filters(mpcode=config_sel.Dawaco_tag)
+        filters = dw.get_daw_filters(mpcode=config_sel.Dawaco_tag).set_index(
+            "MpCode"
+        )
 
-        for mpcode, filtnr in filters.Filtnr.iteritems():
+        for mpcode, filtnr in filters.Filtnr.items():
             print(mpcode, ",,,", filtnr)
             gws = dw.get_daw_ts_stijghgt(mpcode=mpcode, filternr=filtnr)
             gwt = dw.get_daw_ts_temp(mpcode=mpcode, filternr=filtnr)
@@ -98,13 +100,8 @@ def read_plenty_excel(plenty_path):
         fn = os.path.join(plenty_path + ".xlsm")
         if not os.path.exists(fn):
             fn = os.path.join(plenty_path + ".xlsx")
-        plenty_data = pd.ExcelFile(fn)
-        plenty_data = plenty_data.parse(
-            "SQLimport",
-            skiprows=9,
-            # index_col=0,
-            header=0,
-        )  # .iloc[:, :2]
+
+        plenty_data = pd.read_excel(fn, skiprows=9, header=0)
         plenty_data.reset_index(inplace=True)
         plenty_data.drop(plenty_data.filter(regex="Unname"), axis=1, inplace=True)
         plenty_data.replace({"EOF": np.nan}, inplace=True)
@@ -120,43 +117,30 @@ def read_plenty_excel(plenty_path):
 
     else:
         plenty_data = pd.read_feather(plenty_path_feather)
-        plenty_data["ophaal tijdstip"] = pd.to_datetime(plenty_data["ophaal tijdstip"])
-
-        if (
-            "index" in plenty_data
-        ):  # in some datasets a column named index falsely appeared
-            del plenty_data["index"]
-
-        plenty_data.set_index("ophaal tijdstip", inplace=True)
-
+        assert "ophaal tijdstip" == plenty_data.index.name, "Index name is not correct. Most likely the feather file is read using old version of pandas"
     return plenty_data
 
 
 def get_knmi_bodemtemperature(fn):
     bds = pd.read_csv(
-        fn, sep=",", skiprows=16, engine="c", na_values="     ", parse_dates=[[1, 2]]
+        fn, sep=",", skiprows=16, engine="c", na_values="     "
     )
-    bds["date"] = [
-        datetime.strptime(k.split()[0], "%Y%m%d")
-        + pd.Timedelta(int(k.split()[-1]), unit="h")
-        for k in bds["YYYYMMDD_HH"]
-    ]
-    del bds["YYYYMMDD_HH"]
+    bds["date"] = pd.to_datetime(bds["YYYYMMDD"], format="%Y%m%d") + bds.HH.astype('timedelta64[h]')
+    bds.set_index("date", inplace=True)
+    del bds["YYYYMMDD"]
+    del bds["HH"]
     del bds["Unnamed: 12"]
     del bds["# STN"]
 
     bds.columns = bds.columns.str.strip()
-
-    bds.set_index("date", inplace=True)
-
     bds /= 10.0
     return bds
 
 
 def _werkzaamheden_dates():
     def yr_wk_to_date(year, wk_start, wk_end):
-        date_start = datetime.strptime(f"{year}-W{wk_start}-3", "%G-W%V-%u")
-        date_end = datetime.strptime(f"{year}-W{wk_end}-3", "%G-W%V-%u")
+        date_start = datetime.strptime(f"{year}-W{wk_start}-1", "%G-W%V-%u")
+        date_end = datetime.strptime(f"{year}-W{wk_end}-5", "%G-W%V-%u")
         date_avg = date_start + (date_end - date_start) / 2
         return date_avg
 
