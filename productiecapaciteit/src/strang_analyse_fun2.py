@@ -1,10 +1,11 @@
 import os
-
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-import dawacotools as dw
 
+import dawacotools as dw
+import numpy as np
+import pandas as pd
+
+from productiecapaciteit import data_dir
 
 # vanaf najaar 2015 uit Sander Uitendaal's schemas
 # Tussen najaar 2012 en najaar 2015 schatting uit SAP lijst van Gerhard
@@ -38,10 +39,9 @@ werkzaamheden_dict = {
 
 def werkzaamheden_dates():
     def yr_wk_to_date(year, wk_start, wk_end):
-        date_start = datetime.strptime(f"{year}-W{wk_start}-3", "%G-W%V-%u")
-        date_end = datetime.strptime(f"{year}-W{wk_end}-3", "%G-W%V-%u")
-        date_avg = date_start + (date_end - date_start) / 2
-        return date_avg
+        date_start = datetime.strptime(f"{year}-W{wk_start}-1", "%G-W%V-%u")
+        date_end = datetime.strptime(f"{year}-W{wk_end}-5", "%G-W%V-%u")
+        return date_start + (date_end - date_start) / 2
 
     d = {k: pd.DatetimeIndex([yr_wk_to_date(*vv) for vv in v]) for k, v in werkzaamheden_dict.items()}
     return d
@@ -248,18 +248,64 @@ def get_knmi_bodemtemperature(fn):
     return bds
 
 
-def get_config(fn):
-    config = pd.read_excel(fn).set_index("Unnamed: 0").T
-    config = config.loc[:, config.columns.notna()]
-    return config
+def get_config(fn="strang_props7.csv"):
+    """Read a config file with the strangen configurations.
+
+    Parameters
+    ----------
+    fn : str, Path
+        File path to the config file
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with the configurations
+    """
+    dtypes = {
+        "leiding_a_slope": float,
+        "put_a_slope": float,
+        "T": str,
+        "T_sigma": str,
+        "hpand": float,
+        "hluchthappen": float,
+        "hverbindinghaalbuis": float,
+        "hmaaiveld": float,
+        "hbovenkantfilter": float,
+        "honderkantfilter": float,
+        "Qlim_bio": float,
+        "Qpomp": float,
+        "corr_temp_leiding": bool,
+        "test2009": float,
+        "test2015": float,
+        "test2021": float,
+        "nput": float,
+        "Qlim_bio_per_put": float,
+        "Qmin_inzetvolgorde20230523": float,
+        "Qmax_inzetvolgorde20230523": float,
+        "hleidingdruk": float,
+        "hleidingdruk_offset": float,
+        "hverbindingvacuum": float,
+        "test2015_per_put": float,
+        "PA_tag_prefix": str,
+        "PA_tag_flow": str,
+        "PA_tag_hleiding": str,
+        "Dawaco_tag": str,
+        "PA_tag_pandpeil": str,
+        "Binnendiameter:": float,
+        "Wanddikte:": float,
+        "Buitendiameter:": float,
+        "Hydraulische diameter:": float,
+        "Lengte (in meters):": float,
+        "dx_tussenputten": float,
+        "dx_mirrorwell": object,
+    }
+    fp = data_dir / fn
+    out = pd.read_csv(fp, index_col=0, sep=";").T
+    return out.astype(dtypes)
 
 
 def read_plenty_excel(plenty_path):
-    """
-    Read plenty data to feather without dawaco data
-    :param plenty_path:
-    :return:
-    """
+    """Read the plenty excel file and return a pandas dataframe."""
     plenty_path_feather = plenty_path + ".feather"
 
     if not os.path.exists(plenty_path_feather):
@@ -296,17 +342,8 @@ def read_plenty_excel(plenty_path):
     return plenty_data
 
 
-# def read_strang_data(strang, plenty_path, config):
-#     assert strang in config
-#
-#     return None
-
-
 def prepare_strang_data(plenty_path, fp_out, config):
-    """
-    Combines plenty data with a dawaco measurement for entire secundair.
-
-    """
+    """Combine plenty data with a dawaco measurement for entire secundair."""
     if not os.path.exists(fp_out):
         plenty_data = read_plenty_excel(plenty_path)
 
@@ -320,7 +357,7 @@ def prepare_strang_data(plenty_path, fp_out, config):
         # plenty_data[f"{c.PA_tag_prefix}_P"] =
 
         # Filter noisy vacuumurenteller and compute derivative
-        for strang, c in config_sel.iterrows():
+        for _, c in config_sel.iterrows():
             if f"{c.PA_tag_prefix}_OP20" not in plenty_data:
                 continue
 

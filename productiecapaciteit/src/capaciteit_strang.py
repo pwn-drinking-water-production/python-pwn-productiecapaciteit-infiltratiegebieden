@@ -1,15 +1,18 @@
-from datetime import timedelta, datetime
-from pprint import pformat
 from copy import deepcopy
-import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+from pprint import pformat
+
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor
 from productiecapaciteit.src.strang_analyse_fun2 import visc_ratio
+from productiecapaciteit.src.weerstand_pandasaccessors import (
+    LeidingResistanceAccessor,
+    WellResistanceAccessor,
+    WvpResistanceAccessor,
+)
 
 gridspec_kw = {
     "left": 0.07,

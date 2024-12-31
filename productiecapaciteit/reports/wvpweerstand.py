@@ -2,25 +2,25 @@ import logging
 import os
 from datetime import timedelta
 
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
+from productiecapaciteit import data_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
 )
+from productiecapaciteit.src.weerstand_pandasaccessors import (
+    LeidingResistanceAccessor,  # noqa: F401
+    WellResistanceAccessor,  # noqa: F401
+    WvpResistanceAccessor,  # noqa: F401
+)
 
-from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor  # noqa: F401
-from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor  # noqa: F401
-from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor  # noqa: F401
-
-res_folder = os.path.join("..", "results", "Wvpweerstand")
-logger_handler = logging.FileHandler(
-    os.path.join(res_folder, "Wvpweerstandcoefficient.log"), mode="w"
-)  # , encoding='utf-8', level=logging.DEBUG)
+res_folder = results_dir / "Wvpweerstand"
+logger_handler = logging.FileHandler(res_folder / "Wvpweerstandcoefficient.log", mode="w")
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
@@ -132,9 +132,7 @@ def get_wvp_slope_per_year2(index, flow, dp, offset_datum, temp_wvp):
 
 temp_ref = 12.0
 
-data_fd = os.path.join("..", "Data")
-config_fn = "strang_props6.xlsx"
-config = get_config(os.path.join(data_fd, config_fn))
+config = get_config()
 gridspec_kw = {
     "left": 0.07,
     "bottom": 0.12,
@@ -144,26 +142,22 @@ gridspec_kw = {
     "hspace": 0.2,
 }
 
-filterweerstand_fp = os.path.join("..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx")
-leidingweerstand_fp = os.path.join("..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx")
-
-werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
-df_a_fp = os.path.join(res_folder, "Wvpweerstand_modelcoefficienten.xlsx")
+filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoefficienten.xlsx"
+leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"
+df_a_fp = res_folder / "Wvpweerstand_modelcoefficienten.xlsx"
 
 for strang, c in config.iterrows():
     # if strang != "IK95":
     #     continue
 
-    # print(strang)
+    print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
     stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
     logging.info(f"Strang: {strang}")
 
-    df_fp = os.path.join(data_fd, "Merged", f"{strang}-PKA-DSEW036680.feather")
-    df = pd.read_feather(df_fp)
-    df["Datum"] = pd.to_datetime(df["Datum"])
-    df.set_index("Datum", inplace=True)
+    df_fp = data_dir / "Merged" / f"{strang}.feather"
+    df = pd.read_feather(df_fp).set_index("Datum")
 
     include_rules = [
         "Unrealistic flow",
@@ -234,7 +228,7 @@ for strang, c in config.iterrows():
     logging.info(f"Saved result to {fig_path}")
 
     df_a["gewijzigd"] = pd.Timestamp.now()
-    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
+    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
 print("hoi")

@@ -1,24 +1,30 @@
+"""
+Analyse van de leidingweerstand van de strangen.
+
+De leidingweerstand van de strangen wordt geanalyseerd door de drukval over de strang te relateren aan het debiet. De
+leidingweerstand wordt gemodelleerd als een lineaire functie van het debiet. De modelcoëfficiënten worden bepaald door
+de drukval bij verschillende debieten te meten en te modelleren.
+
+TODO: pt10offset laat zien dat soms de de sensoren opnieuw ingehangen zijn. => Opsplitsen offset in tijdreeks en in prepare_data.py toevoegen
+"""
+
 import logging
 import os
-from datetime import timedelta
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
+from productiecapaciteit import data_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
-    model_a_leiding,
     smooth,
-    # get_werkzaamheden_intervals,
-    remove_per_from_werkzh_per,
     werkzaamheden_dates,
 )
-# from productiecapaciteit.src.
-
-from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor  # noqa: F401
 
 res_folder = os.path.abspath(os.path.join(__file__, "..", "..", "results", "Leidingweerstand"))
 logger_handler = logging.FileHandler(
@@ -55,7 +61,7 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
         else:
             return (fun(theta) - df_dP) ** 2
 
-    a_approx = min((df_dP / df_Q**2).median() / 2, -1e-8)
+    a_approx = min((df_dP / df_Q.clip(lower=1) ** 2).median() / 2, -1e-8)
 
     if slope_val is None:
         x0 = [-1e-9] + nper * [a_approx]
@@ -145,9 +151,7 @@ temp_ref = 12.0
 
 fig_folder = os.path.join("Resultaat")
 
-data_fd = os.path.abspath(os.path.join(__file__, "..", "..", "data"))
-config_fn = "strang_props6.xlsx"
-config = get_config(os.path.join(data_fd, config_fn))
+config = get_config()
 gridspec_kw = {
     "left": 0.07,
     "bottom": 0.12,
@@ -156,8 +160,6 @@ gridspec_kw = {
     "wspace": 0.3,
     "hspace": 0.3,
 }
-
-werkzh_fp = os.path.join(data_fd, "Werkzaamheden.xlsx")
 df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 
 for strang, c in config.iterrows():
@@ -170,18 +172,15 @@ for strang, c in config.iterrows():
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
     stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
-    logging.info(f"Strang: {strang}")
+    logging.info("Strang: %s", strang)
 
-    # df_fp = os.path.join(data_fd, "Merged", f"{strang}.feather")
-    df_fp = os.path.join(data_fd, "Merged", f"{strang}-PKA-DSEW036680.feather")
-    df = pd.read_feather(df_fp)
-    df["Datum"] = pd.to_datetime(df["Datum"])
-    df.set_index("Datum", inplace=True)
+    df_fp = data_dir / "Merged" / f"{strang}.feather"
+    df = pd.read_feather(df_fp).set_index("Datum")
 
     include_rules = [
         "Unrealistic flow",
         "Tijdens spuien",
-        # "Little flow"
+        "Little flow",
         # "Niet steady"
     ]
     untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
@@ -191,8 +190,6 @@ for strang, c in config.iterrows():
     df["dPdQ2"] = df.dP / df.Q**2
     df["dPdQ2_smooth"] = smooth(df.dPdQ2, days=0.5)
 
-    # werkzh_per = get_werkzaamheden_intervals(df.dPdQ2.dropna().index, werkzh_fp, strang)
-    # werkzh_datums = np.array([i[0] for i in werkzh_per])
     dates = werkzaamheden_dates()[strang]
     dates = dates[dates > df.dPdQ2.dropna().index[0]]
     werkzh_datums = pd.Index(np.concatenate((df.dPdQ2.dropna().index[[0]].values, dates)))
@@ -212,7 +209,7 @@ for strang, c in config.iterrows():
 
     df_a["gewijzigd"] = pd.Timestamp.now()
     df_a = df_a.leiding.add_zero_effect_dates(dates)
-    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
+    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
     plt.style.use(["unhcrpyplotstyle", "line"])

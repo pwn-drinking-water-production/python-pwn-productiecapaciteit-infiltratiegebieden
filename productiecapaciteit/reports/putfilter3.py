@@ -5,21 +5,17 @@ Gebuik dit script om de filterweerstandcoefficienten te berekenen.
 import logging
 import os
 
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from productiecapaciteit.src.strang_analyse_fun2 import get_config, get_false_measurements, werkzaamheden_dates, smooth
+from productiecapaciteit import data_dir, results_dir
+from productiecapaciteit.src.strang_analyse_fun2 import get_config, get_false_measurements, smooth, werkzaamheden_dates
+from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor  # noqa: F401
 
-from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
-
-res_folder = os.path.join("..", "results", "Filterweerstand")
-
-logger_handler = logging.FileHandler(
-    os.path.join(res_folder, "Putweerstandcoefficient.log"), mode="w"
-)  # , encoding='utf-8', level=logging.DEBUG)
+res_folder = results_dir / "Filterweerstand"
+logger_handler = logging.FileHandler(res_folder / "Putweerstandcoefficient.log", mode="w")
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
@@ -111,9 +107,7 @@ temp_ref = 12.0
 
 fig_folder = os.path.join("Resultaat")
 
-data_fd = os.path.join("..", "Data")
-config_fn = "strang_props6.xlsx"
-config = get_config(os.path.join(data_fd, config_fn))
+config = get_config()
 gridspec_kw = {
     "left": 0.07,
     "bottom": 0.12,
@@ -123,7 +117,6 @@ gridspec_kw = {
     "hspace": 0.2,
 }
 
-werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
 df_a_fp = os.path.join(res_folder, "Filterweerstand_modelcoefficienten.xlsx")
 
 
@@ -137,11 +130,8 @@ for strang, c in config.iterrows():
 
     logging.info(f"Strang: {strang}")
 
-    # df_fp = os.path.join(data_fd, "Merged", f"{strang}.feather")
-    df_fp = os.path.join(data_fd, "Merged", f"{strang}-PKA-DSEW036680.feather")
-    df = pd.read_feather(df_fp)
-    df["Datum"] = pd.to_datetime(df["Datum"])
-    df.set_index("Datum", inplace=True)
+    df_fp = data_dir / "Merged" / f"{strang}.feather"
+    df = pd.read_feather(df_fp).set_index("Datum")
 
     include_rules = ["Unrealistic flow"]
     untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
@@ -156,12 +146,12 @@ for strang, c in config.iterrows():
 
     Q_avg = df.Q.mean() / c.nput
     slope = c.put_a_slope
-    df_a = analyse_a_put2(df.dPdQ, werkzh_datums, Q_avg, t_projectie="2023-10-31 00:00:00", slope=slope)
+    df_a = analyse_a_put2(df.dPdQ, werkzh_datums, Q_avg, t_projectie="2025-10-31 00:00:00", slope=slope)
 
     # save results
     df_a["gewijzigd"] = pd.Timestamp.now()
     df_a = df_a.leiding.add_zero_effect_dates(dates)
-    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
+    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
     plt.style.use(["unhcrpyplotstyle", "line"])

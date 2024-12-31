@@ -21,7 +21,9 @@ dependencies = [
     "pyarrow",
     "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git",
     "unhcrpyplotstyle @ git+https://github.com/leichen88/unhcrpyplotstyle.git",
-
+    "pandas-stubs>=2.0.2.230605",
+    "openpyxl",
+    "ruff==0.6.8",
 ]
 keywords = ["hydrology", "groundwater", "modeling", "Modflow 6", "flopy"]
 classifiers = [
@@ -57,3 +59,6 @@ profile = "black"
 
 [tool.hatch.envs.hatch-static-analysis]
 config-path = "ruff.toml"
+
+[tool.mypy]
+ignore_missing_imports = true
