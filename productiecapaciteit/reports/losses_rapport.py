@@ -31,7 +31,6 @@ gridspec_kw = {
 }
 
 config = get_config()
-config = config.loc[:, config.columns.notna()]
 
 filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoefficienten.xlsx"
 leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"

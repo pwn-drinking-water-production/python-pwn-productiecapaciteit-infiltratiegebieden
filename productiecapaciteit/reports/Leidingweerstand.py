@@ -277,7 +277,4 @@ for strang, c in config.iterrows():
         fig.savefig(fig_path, dpi=300)
 
 plt.show()
-
-# print("hoi")
-
 print("hoi")

@@ -1,0 +1,25 @@
+Strang	Effect	Welke	Limieten	Limieten_na_schoonmaak
+Q100	NIHIL	-	Vacuumsysteem, Luchthappen, Verblijftijd	-
+Q200	NIHIL	-	Vacuumsysteem	-
+Q300	NIHIL	-	Luchthappen	-
+Q400	NIHIL	-	Luchthappen	-
+Q500	NIHIL	-	Vacuumsysteem, Luchthappen	-
+Q600	89	Filter	Luchthappen	Vacuumsysteem, Luchthappen
+P100	109	Filter	Vacuumsysteem, Luchthappen	Pompcapaciteit, Verblijftijd
+P200	9	Leiding en filter	Vacuumsysteem, Luchthappen	Vacuumsysteem, Luchthappen
+P300	96	Filter	Vacuumsysteem, Luchthappen	Vacuumsysteem, Luchthappen
+P400	NIHIL	-	Luchthappen	-
+P500	NIHIL	-	Luchthappen	-
+P600	NIHIL	-	Vacuumsysteem, Luchthappen	-
+IK91	NIHIL	-	Luchthappen	-
+IK92	38	Leiding	Vacuumsysteem	Pompcapaciteit, Vacuumsysteem
+IK93	NIHIL	-	Pompcapaciteit, Vacuumsysteem	-
+IK94	NIHIL	-	Pompcapaciteit, Vacuumsysteem	-
+IK95	19	Leiding	Vacuumsysteem, Luchthappen	Pompcapaciteit, Vacuumsysteem
+IK96	NIHIL	-	Pompcapaciteit, Vacuumsysteem	-
+IK101	8	Leiding	Vacuumsysteem, Luchthappen	Vacuumsysteem, Luchthappen
+IK102	NIHIL	-	Pompcapaciteit	-
+IK103	NIHIL	-	Pompcapaciteit	-
+IK104	NIHIL	-	Pompcapaciteit, Vacuumsysteem	-
+IK105	44	Leiding	Vacuumsysteem	Pompcapaciteit
+IK106	18	Leiding	Vacuumsysteem	Pompcapaciteit, Vacuumsysteem
