@@ -54,3 +54,6 @@ line-length = 88
 
 [tool.isort]
 profile = "black"
+
+[tool.hatch.envs.hatch-static-analysis]
+config-path = "ruff.toml"
