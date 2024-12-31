@@ -1,3 +1,8 @@
+"""
+Calculate the model coefficients for the WVP resistance model.
+
+TODO: Use mutiple Hantush wells to calculate the model coefficients for the WVP resistance model.
+"""
 import logging
 import os
 from datetime import timedelta
