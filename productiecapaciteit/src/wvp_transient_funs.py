@@ -9,16 +9,10 @@ def get_temp(index, mean, delta, time_offset, return_series=False):
     index_datetime = pd.DatetimeIndex(index)
     year = pd.Categorical(index_datetime.year, ordered=True)
     start_year = year.rename_categories(pd.to_datetime(year.categories, format="%Y"))
-    end_year = year.rename_categories(
-        pd.to_datetime(year.categories.astype(str) + "1231", format="%Y%m%d")
-    )
+    end_year = year.rename_categories(pd.to_datetime(year.categories.astype(str) + "1231", format="%Y%m%d"))
     nday_year = end_year.map(lambda x: x.dayofyear).astype(float)
     dt_year = index_datetime - start_year.to_numpy()
-    temp_data = (
-        delta
-        * np.sin((dt_year / pd.Timedelta("1D") - time_offset) * 2 * np.pi / nday_year)
-        + mean
-    )
+    temp_data = delta * np.sin((dt_year / pd.Timedelta("1D") - time_offset) * 2 * np.pi / nday_year) + mean
     if return_series:
         return pd.Series(data=temp_data, index=index_datetime, name="wvp_model_temp")
     else:
@@ -26,9 +20,7 @@ def get_temp(index, mean, delta, time_offset, return_series=False):
 
 
 def visc_ratio(temp, temp_ref=10.0):
-    visc_ref = (
-        1 + 0.0155 * (temp_ref - 20.0)
-    ) ** -1.572  # / 1000  removed the division because we re taking a ratio.
+    visc_ref = (1 + 0.0155 * (temp_ref - 20.0)) ** -1.572  # / 1000  removed the division because we re taking a ratio.
     visc = (1 + 0.0155 * (temp - 20.0)) ** -1.572  # / 1000
     return visc / visc_ref
 
@@ -78,19 +70,19 @@ def objective(args, return_result=False, **pextra):
         return multi * hantush(alpha, beta, kD, **pextra)
 
     if pextra["multiwell_contains_r_self"]:
-            grouper_list = []
+        grouper_list = []
 
-            for multi, distance in pextra["multiwell"]:
-                grouper_list.append(
-                    asyncio.get_event_loop().run_in_executor(
-                        None,
-                        multihantush,
-                        1,
-                        distance * alpha,
-                        beta,
-                        kD,
-                    )
+        for multi, distance in pextra["multiwell"]:
+            grouper_list.append(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    multihantush,
+                    1,
+                    distance * alpha,
+                    beta,
+                    kD,
                 )
+            )
     else:
         grouper_list = [
             asyncio.get_event_loop().run_in_executor(
@@ -117,7 +109,6 @@ def objective(args, return_result=False, **pextra):
                 )
 
     # if "rain" in pextra:
-
 
     loop = asyncio.get_event_loop()
     looper = asyncio.gather(*grouper_list)
@@ -179,9 +170,7 @@ def hantush(alpha, beta, kD, **pextra):
     it_arr = np.arange(nt_max)[None, :] + np.arange(nt)[:, None]
     exclude = it_arr > (nt - 1)
     it_arr[exclude] = nt - 1
-    time_arr = (pextra["index"][it_arr] - pextra["index"][:, None]) / pd.Timedelta(
-        1.0, unit="D"
-    )
+    time_arr = (pextra["index"][it_arr] - pextra["index"][:, None]) / pd.Timedelta(1.0, unit="D")
 
     # compute h for nt * nt_max
     beta_arr = beta
@@ -197,14 +186,10 @@ def hantush(alpha, beta, kD, **pextra):
 
     # transient
     ds_flipped = np.fliplr(ds)
-    drawdown = np.array(
-        [np.trace(ds_flipped, i) for i in np.arange(nt_max - 1, -nt + nt_max - 1, -1)]
-    )
+    drawdown = np.array([np.trace(ds_flipped, i) for i in np.arange(nt_max - 1, -nt + nt_max - 1, -1)])
 
     # steady
-    drawdown[nt_max:] += (
-        np.cumsum(dQ)[: nt - nt_max] / (4 * np.pi * kD[nt_max:]) * h_inf[nt_max:]
-    )
+    drawdown[nt_max:] += np.cumsum(dQ)[: nt - nt_max] / (4 * np.pi * kD[nt_max:]) * h_inf[nt_max:]
 
     return drawdown
 
@@ -215,13 +200,9 @@ def expint(u):
 
     out = np.zeros_like(u, dtype=float)
     show = u < 1
-    out[show] = (
-        np.log(np.exp(-gamma) / u[show]) + 0.9653 * u[show] - 0.1690 * u[show] ** 2
-    )
+    out[show] = np.log(np.exp(-gamma) / u[show]) + 0.9653 * u[show] - 0.1690 * u[show] ** 2
     show2 = np.logical_and(~show, u < 20)
-    out[show2] = (
-        1.0 / (u[show2] * np.exp(u[show2])) * (u[show2] + 0.3575) / (u[show2] + 1.280)
-    )
+    out[show2] = 1.0 / (u[show2] * np.exp(u[show2])) * (u[show2] + 0.3575) / (u[show2] + 1.280)
     return out
 
 

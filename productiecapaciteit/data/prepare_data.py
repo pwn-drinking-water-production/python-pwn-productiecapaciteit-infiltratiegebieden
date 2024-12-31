@@ -10,7 +10,7 @@
 
 import os
 from datetime import timedelta
- 
+
 import dawacotools as dw
 import numpy as np
 import pandas as pd
@@ -43,9 +43,7 @@ prepare_strang_data(fp_in, fp_out, config)
 # fp_out = os.path.join(data_fd, "Plenty", "10.feather")
 # prepare_strang_data(fp_in, fp_out, config)
 
-infil_temp = dw.get_daw_ts_temp(
-    mpcode="19CZL5132", filternr=1
-)  # See infiltration_temperature.py
+infil_temp = dw.get_daw_ts_temp(mpcode="19CZL5132", filternr=1)  # See infiltration_temperature.py
 
 pandpeil_fp = os.path.join(data_fd, "Plenty", "PREP2XL_v122_pandpeilen")
 pandpeil = read_plenty_excel(pandpeil_fp)
@@ -102,8 +100,6 @@ for strang, c in config.iterrows():
         df_out[f"gwt{i}"] = df[f"gwt_{c.Dawaco_tag}_{i}"]
 
     df_out.index.rename("Datum", inplace=True)
-    df_out.reset_index().to_feather(
-        os.path.join(data_fd, "Merged", f"{strang}.feather")
-    )
+    df_out.reset_index().to_feather(os.path.join(data_fd, "Merged", f"{strang}.feather"))
 
 print("hoi")

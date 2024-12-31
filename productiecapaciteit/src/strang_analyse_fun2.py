@@ -82,31 +82,22 @@ def get_rule_tijdens_proppen(d, c):
 
 def get_rule_issteady(d, c):
     dQ = d.Q.diff() / d.Q * 100.0
-    window = int(timedelta(days=1/12) / (d.index[1] - d.index[0]))
-    is_steady = (
-        np.abs(dQ).rolling(window=window, min_periods=window, center=False).max()
-        < 5.
-    )
+    window = int(timedelta(days=1 / 12) / (d.index[1] - d.index[0]))
+    is_steady = np.abs(dQ).rolling(window=window, min_periods=window, center=False).max() < 5.0
     return ~is_steady
 
 
 def get_rule_is3dsteady(d, c):
     dQ = d.Q.diff() / d.Q * 100.0
     window = int(timedelta(days=3) / (d.index[1] - d.index[0]))
-    is_steady = (
-        np.abs(dQ).rolling(window=window, min_periods=window, center=False).max()
-        < 5.
-    )
+    is_steady = np.abs(dQ).rolling(window=window, min_periods=window, center=False).max() < 5.0
     return ~is_steady
 
 
 def get_rule_is1dsteady(d, c):
     dQ = d.Q.diff() / d.Q * 100.0
     window = int(timedelta(days=1) / (d.index[1] - d.index[0]))
-    is_steady = (
-        np.abs(dQ).rolling(window=window, min_periods=window, center=False).max()
-        < 5.
-    )
+    is_steady = np.abs(dQ).rolling(window=window, min_periods=window, center=False).max() < 5.0
     return ~is_steady
 
 
@@ -134,8 +125,7 @@ def get_rules(exclude_rules=[], include_rules=[]):
         ("Unrealistic flow", lambda d, c: d["Q"] > c.Qpomp),
         (
             "Improbable flow",
-            lambda d, c: d["Q"]
-            > np.nanmin((np.nanmax((c.test2009, c.test2015, c.test2021)), c.Qpomp)),
+            lambda d, c: d["Q"] > np.nanmin((np.nanmax((c.test2009, c.test2015, c.test2021)), c.Qpomp)),
         ),
         (
             "Strang water pressure above surface level",
@@ -162,9 +152,7 @@ def get_rules(exclude_rules=[], include_rules=[]):
     return rules
 
 
-def get_false_measurements(
-    ds, c, extend_hours=None, exclude_rules=[], include_rules=[]
-):
+def get_false_measurements(ds, c, extend_hours=None, exclude_rules=[], include_rules=[]):
     """True for untrusted values/times. c is row of config of type pandas dataseries"""
     rules = get_rules(exclude_rules=exclude_rules, include_rules=include_rules)
 
@@ -173,7 +161,7 @@ def get_false_measurements(
 
     for ir, (r_label, r_rule) in enumerate(rules):
         show = r_rule(ds, c)
-        print(f'{r_label.ljust(r_space)}: {show.sum() / show.size * 100:4.1f}% of the measurements.')
+        print(f"{r_label.ljust(r_space)}: {show.sum() / show.size * 100:4.1f}% of the measurements.")
         show_list.append(show)
 
     shows = np.logical_or.reduce(show_list, axis=0)
@@ -181,10 +169,7 @@ def get_false_measurements(
     if extend_hours is not None:
         # Also include the values `extend_hours` before and after
         ndt = int(timedelta(hours=extend_hours) / (ds.index[1] - ds.index[0]))
-        shows = [
-            any(shows[max((i - ndt, 0)) : min((i + ndt, shows.size - 1))])
-            for i in range(shows.size)
-        ]
+        shows = [any(shows[max((i - ndt, 0)) : min((i + ndt, shows.size - 1))]) for i in range(shows.size)]
 
     return shows
 
@@ -194,15 +179,11 @@ def smooth(df, days=1):
     return df.dropna().rolling(window=window, center=True).median().reindex(df.index)
 
 
-def plot_false_measurements(
-    ax, ds, c, extend_hours=None, exclude_rules=[], include_rules=[]
-):
+def plot_false_measurements(ax, ds, c, extend_hours=None, exclude_rules=[], include_rules=[]):
     rules = get_rules(exclude_rules=exclude_rules, include_rules=include_rules)
 
     for ir, (r_label, r_rule) in enumerate(rules):
-        show = get_false_measurements(
-            ds, c, extend_hours=extend_hours, include_rules=[r_label]
-        )
+        show = get_false_measurements(ds, c, extend_hours=extend_hours, include_rules=[r_label])
 
         # print(r_label, str(show.sum() / len(ds)))
 
@@ -235,12 +216,10 @@ def plot_false_measurements(
     )
 
     ax.set_ylabel("Foutieve metingen")
-    ax.legend(fontsize='small')
+    ax.legend(fontsize="small")
 
 
-def get_trusted_measurements(
-    ds, c, extend_hours=None, exclude_rules=[], include_rules=[]
-):
+def get_trusted_measurements(ds, c, extend_hours=None, exclude_rules=[], include_rules=[]):
     """True for trusted values/times"""
     return ~get_false_measurements(
         ds,
@@ -252,12 +231,9 @@ def get_trusted_measurements(
 
 
 def get_knmi_bodemtemperature(fn):
-    bds = pd.read_csv(
-        fn, sep=",", skiprows=16, engine="c", na_values="     ", parse_dates=[[1, 2]]
-    )
+    bds = pd.read_csv(fn, sep=",", skiprows=16, engine="c", na_values="     ", parse_dates=[[1, 2]])
     bds["date"] = [
-        datetime.strptime(k.split()[0], "%Y%m%d")
-        + pd.Timedelta(int(k.split()[-1]), unit="h")
+        datetime.strptime(k.split()[0], "%Y%m%d") + pd.Timedelta(int(k.split()[-1]), unit="h")
         for k in bds["YYYYMMDD_HH"]
     ]
     del bds["YYYYMMDD_HH"]
@@ -303,9 +279,7 @@ def read_plenty_excel(plenty_path):
         plenty_data["ophaal tijdstip"] = pd.to_datetime(plenty_data["ophaal tijdstip"])
         plenty_data.set_index("ophaal tijdstip", inplace=True)
 
-        if (
-            "index" in plenty_data
-        ):  # in some datasets a column named index falsely appeared
+        if "index" in plenty_data:  # in some datasets a column named index falsely appeared
             del plenty_data["index"]
 
         plenty_data.to_feather(plenty_path_feather)
@@ -314,9 +288,7 @@ def read_plenty_excel(plenty_path):
         plenty_data = pd.read_feather(plenty_path_feather)
         plenty_data["ophaal tijdstip"] = pd.to_datetime(plenty_data["ophaal tijdstip"])
 
-        if (
-            "index" in plenty_data
-        ):  # in some datasets a column named index falsely appeared
+        if "index" in plenty_data:  # in some datasets a column named index falsely appeared
             del plenty_data["index"]
 
         plenty_data.set_index("ophaal tijdstip", inplace=True)
@@ -338,9 +310,7 @@ def prepare_strang_data(plenty_path, fp_out, config):
     if not os.path.exists(fp_out):
         plenty_data = read_plenty_excel(plenty_path)
 
-        config_sel_mask = config.PA_tag_prefix.isin(
-            set(s.split("_")[0] for s in plenty_data)
-        )
+        config_sel_mask = config.PA_tag_prefix.isin(set(s.split("_")[0] for s in plenty_data))
         config_sel = config.loc[config_sel_mask]
 
         # parse pressure sensors:
@@ -376,12 +346,8 @@ def prepare_strang_data(plenty_path, fp_out, config):
 
             ndt = int(timedelta(days=2) / (plenty_data.index[1] - plenty_data.index[0]))
             name_gws, name_gwt = f"gws_{mpcode}_{filtnr}", f"gwt_{mpcode}_{filtnr}"
-            plenty_data[name_gws] = gws.reindex(plenty_data.index).interpolate(
-                "slinear", limit=ndt
-            )
-            plenty_data[name_gwt] = gwt.reindex(plenty_data.index).interpolate(
-                "slinear", limit=ndt
-            )
+            plenty_data[name_gws] = gws.reindex(plenty_data.index).interpolate("slinear", limit=ndt)
+            plenty_data[name_gwt] = gwt.reindex(plenty_data.index).interpolate("slinear", limit=ndt)
 
         # if pt10_nap is not None:
         #     pres_tags = [k for k in plenty_data.keys() if k.split('_')[-1] == 'P']
@@ -402,9 +368,7 @@ def prepare_strang_data(plenty_path, fp_out, config):
 
 def visc_ratio(temp, temp_ref=10.0):
     # visc_ratio(15, temp_ref=8) = 0.82
-    visc_ref = (
-        1 + 0.0155 * (temp_ref - 20.0)
-    ) ** -1.572  # / 1000  removed the division because we re taking a ratio.
+    visc_ref = (1 + 0.0155 * (temp_ref - 20.0)) ** -1.572  # / 1000  removed the division because we re taking a ratio.
     visc = (1 + 0.0155 * (temp - 20.0)) ** -1.572  # / 1000
     return visc / visc_ref
 
@@ -439,21 +403,15 @@ def deconvolve_wvp(series, shift, sigma):
 
     if shift[0] == "-":
         series = pd.Series(data=series.values[::-1], index=series.index)
-        series = series.rolling(2 * int_shift, win_type="gaussian", center=center).mean(
-            std=int_sigma
-        )
+        series = series.rolling(2 * int_shift, win_type="gaussian", center=center).mean(std=int_sigma)
         series = pd.Series(data=series.values[::-1], index=series.index)
         return series
 
     else:
-        return series.rolling(2 * int_shift, win_type="gaussian", center=center).mean(
-            std=int_sigma
-        )
+        return series.rolling(2 * int_shift, win_type="gaussian", center=center).mean(std=int_sigma)
 
 
-def temp_correct_discharge(
-    discharge, temp_inf, residence_time, residence_sigma, temp_ref=12.0
-):
+def temp_correct_discharge(discharge, temp_inf, residence_time, residence_sigma, temp_ref=12.0):
     if residence_time == "Niet":
         return pd.Series(data=discharge, index=temp_inf.index)
     else:
@@ -461,9 +419,7 @@ def temp_correct_discharge(
         return discharge * visc_ratio(aquifer_temp, temp_ref=temp_ref)
 
 
-def temp_correct_drawdown_or_cwvp(
-    drawdown, temp_inf, residence_time, residence_sigma, temp_ref=12.0
-):
+def temp_correct_drawdown_or_cwvp(drawdown, temp_inf, residence_time, residence_sigma, temp_ref=12.0):
     if residence_time == "Niet":
         return pd.Series(data=drawdown, index=temp_inf.index)
     else:
@@ -473,37 +429,36 @@ def temp_correct_drawdown_or_cwvp(
 
 def model_a_leiding(df, periods, slope, offsets, Q=None):
     d_offset = pd.Series(index=df.index, data=0)
-    d_days_start_wzh = pd.Series(index=df.index, data=0.)
+    d_days_start_wzh = pd.Series(index=df.index, data=0.0)
 
     # Adjust final end time assume no schoonmaak happened
     periods[-1] = (periods[-1][0], df.index[-1])
 
     for offset, (start, end) in zip(offsets, periods):
         d_offset[start:end] = offset
-        d_days_start_wzh[start:end] = - (d_days_start_wzh[start:end].index - start) / pd.Timedelta(days=1)
+        d_days_start_wzh[start:end] = -(d_days_start_wzh[start:end].index - start) / pd.Timedelta(days=1)
 
     # Add only an offset to times before first period
-    d_offset[:periods[0][0]] = offsets[0]
+    d_offset[: periods[0][0]] = offsets[0]
 
     if Q is None:
-        return -(d_offset + slope * d_days_start_wzh) * df.Q ** 2
+        return -(d_offset + slope * d_days_start_wzh) * df.Q**2
     else:
-        return -(d_offset + slope * d_days_start_wzh) * Q ** 2
+        return -(d_offset + slope * d_days_start_wzh) * Q**2
 
 
 def model_a_put(df, periods, slope, offsets):
     d_offset = pd.Series(index=df.index, data=0)
-    d_days_start_wzh = pd.Series(index=df.index, data=0.)
+    d_days_start_wzh = pd.Series(index=df.index, data=0.0)
 
     # Adjust final end time assume no schoonmaak happened
     periods[-1] = (periods[-1][0], df.index[-1])
 
     for offset, (start, end) in zip(offsets, periods):
         d_offset[start:end] = offset
-        d_days_start_wzh[start:end] = - (d_days_start_wzh[start:end].index - start) / pd.Timedelta(days=1)
+        d_days_start_wzh[start:end] = -(d_days_start_wzh[start:end].index - start) / pd.Timedelta(days=1)
 
     # Add only an offset to times before first period
-    d_offset[:periods[0][0]] = offsets[0]
+    d_offset[: periods[0][0]] = offsets[0]
 
     return d_offset + slope * d_days_start_wzh
-

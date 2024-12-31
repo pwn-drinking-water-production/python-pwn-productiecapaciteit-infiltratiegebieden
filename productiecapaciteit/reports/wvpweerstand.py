@@ -13,9 +13,9 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
     get_false_measurements,
 )
 
-from productiecapaciteit.src.weerstand_pandasaccessors  import LeidingResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors  import WellResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors  import WvpResistanceAccessor
+from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor  # noqa: F401
+from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor  # noqa: F401
+from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor  # noqa: F401
 
 res_folder = os.path.join("..", "results", "Wvpweerstand")
 logger_handler = logging.FileHandler(
@@ -40,18 +40,16 @@ def get_wvp_slope_per_year2(index, flow, dp, offset_datum, temp_wvp):
     def get_df_a(theta):
         slope_val, offset = theta
 
-        return pd.Series(
-            {
-                "offset": offset,
-                "offset_datum": offset_datum,
-                "slope": slope_val,
-                "temp_mean": 0,
-                "temp_delta": 0,
-                "time_offset": 0,
-                "method": "Niet",
-                "temp_ref": 12.0,
-            }
-        )
+        return pd.Series({
+            "offset": offset,
+            "offset_datum": offset_datum,
+            "slope": slope_val,
+            "temp_mean": 0,
+            "temp_delta": 0,
+            "time_offset": 0,
+            "method": "Niet",
+            "temp_ref": 12.0,
+        })
 
     def fun_a(theta):
         return get_df_a(theta).wvp.dp_model(index, flow, temp_wvp=temp_wvp)
@@ -88,18 +86,16 @@ def get_wvp_slope_per_year2(index, flow, dp, offset_datum, temp_wvp):
     def get_df_temp_model(theta):
         temp_delta, time_offset = theta
 
-        return pd.Series(
-            {
-                "offset": df_a1.offset,
-                "offset_datum": df_a1.offset_datum,
-                "slope": df_a1.slope,
-                "temp_mean": temp_mean,
-                "temp_delta": temp_delta,
-                "time_offset": time_offset,
-                "method": "sin",
-                "temp_ref": df_a1.temp_ref,
-            }
-        )
+        return pd.Series({
+            "offset": df_a1.offset,
+            "offset_datum": df_a1.offset_datum,
+            "slope": df_a1.slope,
+            "temp_mean": temp_mean,
+            "temp_delta": temp_delta,
+            "time_offset": time_offset,
+            "method": "sin",
+            "temp_ref": df_a1.temp_ref,
+        })
 
     def fun_temp(theta):
         return get_df_temp_model(theta).wvp.dp_model(index, flow)
@@ -148,12 +144,8 @@ gridspec_kw = {
     "hspace": 0.2,
 }
 
-filterweerstand_fp = os.path.join(
-    "..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx"
-)
-leidingweerstand_fp = os.path.join(
-    "..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx"
-)
+filterweerstand_fp = os.path.join("..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx")
+leidingweerstand_fp = os.path.join("..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx")
 
 werkzh_fp = os.path.join("..", "Data", "Werkzaamheden.xlsx")
 df_a_fp = os.path.join(res_folder, "Wvpweerstand_modelcoefficienten.xlsx")
@@ -180,27 +172,19 @@ for strang, c in config.iterrows():
         # "Niet steady",
         # "Niet 3-day steady"
     ]
-    untrusted_measurements = get_false_measurements(
-        df, c, extend_hours=1, include_rules=include_rules
-    )
+    untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
 
     df.loc[untrusted_measurements, :] = np.nan
 
     # only use steady state (2 days constant)
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
     df_a_leiding = pd.read_excel(leidingweerstand_fp, sheet_name=strang)
-    p_omstorting = df.gws1.where(
-        ~df.gws1.isna(), df.gws0 + df_a_filter.wel.dp_model(df.index, df.Q / c.nput)
-    )
+    p_omstorting = df.gws1.where(~df.gws1.isna(), df.gws0 + df_a_filter.wel.dp_model(df.index, df.Q / c.nput))
     df["dP_wvp2"] = p_omstorting - df.pandpeil
     percentage = 0.20
 
     window = int(timedelta(days=2) / (df.index[1] - df.index[0]))
-    dQ_rol = (
-        np.abs(df.Q.diff() / df.Q)
-        .rolling(window=window, min_periods=window, center=False)
-        .max()
-    )
+    dQ_rol = np.abs(df.Q.diff() / df.Q).rolling(window=window, min_periods=window, center=False).max()
     out = pd.Series(index=df.index, data=True)
     n_true = int(percentage * len(df))
     is_true = dQ_rol.nsmallest(n_true)
@@ -210,7 +194,7 @@ for strang, c in config.iterrows():
     df_a = get_wvp_slope_per_year2(df.index, df.Q, df.dP_wvp2, df.index[0], df.T_bodem)
 
     # measured dp
-    plt.style.use(['unhcrpyplotstyle', 'line'])
+    plt.style.use(["unhcrpyplotstyle", "line"])
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 9), sharex=True, sharey=True, gridspec_kw=gridspec_kw)
     ax0.plot(
         df.index,
@@ -224,12 +208,9 @@ for strang, c in config.iterrows():
     ax0.legend(loc=(0, 1), ncol=2)
     ax0.set_ylabel(f"Drukverlies wvp bij gemeten Q (m)")
     ax0.xaxis.set_major_locator(mdates.YearLocator())
-    ax0.xaxis.set_major_formatter(
-        mdates.ConciseDateFormatter(ax0.xaxis.get_major_locator()))
+    ax0.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax0.xaxis.get_major_locator()))
     Q_avg = df.Q.median()
-    std = (
-        df_a.wvp.dp_model(df.index, Q_avg, df.T_bodem) - df.dP_wvp2 / df.Q * Q_avg
-    ).std()
+    std = (df_a.wvp.dp_model(df.index, Q_avg, df.T_bodem) - df.dP_wvp2 / df.Q * Q_avg).std()
     model_std = (df_a.wvp.dp_model(df.index, Q_avg) - df.dP_wvp2 / df.Q * Q_avg).std()
     df_a["model_std"] = model_std
 
@@ -245,8 +226,7 @@ for strang, c in config.iterrows():
     ax1.legend(loc=(0, 1), ncol=2)
     ax1.set_ylabel(f"Drukverlies wvp bij Q={Q_avg:.0f}m3/h (m)")
     ax1.xaxis.set_major_locator(mdates.YearLocator())
-    ax1.xaxis.set_major_formatter(
-        mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator()))
+    ax1.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator()))
 
     fig.tight_layout()
     fig_path = os.path.join(res_folder, f"Wvpweerstandcoefficient - {strang}.png")

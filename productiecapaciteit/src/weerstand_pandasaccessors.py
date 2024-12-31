@@ -14,11 +14,7 @@ class WellResistanceAccessor:
     @staticmethod
     def _validate(obj):
         # verify there is a column latitude and a column longitude
-        if (
-            "datum" not in obj.columns
-            or "offset" not in obj.columns
-            or "slope" not in obj.columns
-        ):
+        if "datum" not in obj.columns or "offset" not in obj.columns or "slope" not in obj.columns:
             raise AttributeError("Must have 'datum' and 'offset' and 'slope'.")
 
         # all dates are sorted
@@ -48,9 +44,7 @@ class WellResistanceAccessor:
         # a_voor bestaat niet voor eerste datum
         dt = (self.datum[1:] - self.datum[:-1]) / pd.Timedelta(days=1)
 
-        a_voor = np.concatenate(
-            ([np.nan], dt * self.slope[:-1] + self.offset[:-1]), axis=0
-        )
+        a_voor = np.concatenate(([np.nan], dt * self.slope[:-1] + self.offset[:-1]), axis=0)
         return a_voor
 
     @property
@@ -62,9 +56,7 @@ class WellResistanceAccessor:
         return self.a_na / self.a_voor
 
     def a_voor_projectie(self, datum_projectie):
-        return self.a_na[-1] + self.slope[-1] * (
-            pd.Timestamp(datum_projectie) - self.datum[-1]
-        ) / pd.Timedelta(days=1)
+        return self.a_na[-1] + self.slope[-1] * (pd.Timestamp(datum_projectie) - self.datum[-1]) / pd.Timedelta(days=1)
 
     def a_na_projectie(self, datum_projectie, method="mean", reductie=None):
         if reductie is None:
@@ -73,7 +65,7 @@ class WellResistanceAccessor:
                 reductie = np.nanmean(self.a_effect[1:])
             else:
                 print("Geen schoonmaken die putweerstand doen afnemen => geen voorspelde reductie")
-                reductie = 1.
+                reductie = 1.0
 
         return self.a_voor_projectie(datum_projectie) * reductie
 
@@ -92,14 +84,10 @@ class WellResistanceAccessor:
         if index[-1] > datums[-1]:
             datums = np.concatenate((datums, index[[-1]]))
 
-        for offset, slope, datum, start, end in zip(
-            self.offset, self.slope, self.datum, datums[:-1], datums[1:]
-        ):
+        for offset, slope, datum, start, end in zip(self.offset, self.slope, self.datum, datums[:-1], datums[1:]):
             d_offset[start:end] = offset
             d_slope[start:end] = slope
-            d_days_since_wzh[start:end] = (
-                d_days_since_wzh[start:end].index - datum
-            ) / pd.Timedelta(days=1)
+            d_days_since_wzh[start:end] = (d_days_since_wzh[start:end].index - datum) / pd.Timedelta(days=1)
 
         # Add only an offset to times before first datum
         d_slope[: datums[0]] = 0.0
@@ -123,7 +111,7 @@ class WellResistanceAccessor:
             "datum": dates_new,
             "offset": offsets_new,
             "slope": slopes_new,
-            "gewijzigd": gewijzigd_new
+            "gewijzigd": gewijzigd_new,
         })
 
         values_new = np.insert(self._obj.values, 0, values=df_new.values, axis=0)
@@ -149,10 +137,7 @@ class WellResistanceAccessor:
 
     def dp_projectie_na(self, datum_projectie, flow, method="mean", reductie=None):
         # Flow per put
-        return (
-            self.a_na_projectie(datum_projectie, method=method, reductie=reductie)
-            * flow
-        )
+        return self.a_na_projectie(datum_projectie, method=method, reductie=reductie) * flow
 
     def dp_model(self, index, flow):
         # Flow per put
@@ -285,22 +270,12 @@ class WvpResistanceAccessor:
         if self.method == "sin":
             # temp = delta * sin((t - offset) * 2 * pi / 365) + mean
             year = pd.Categorical(index.year, ordered=True)
-            start_year = year.rename_categories(
-                pd.to_datetime(year.categories, format="%Y")
-            )
-            end_year = year.rename_categories(
-                pd.to_datetime(year.categories.astype(str) + "1231", format="%Y%m%d")
-            )
+            start_year = year.rename_categories(pd.to_datetime(year.categories, format="%Y"))
+            end_year = year.rename_categories(pd.to_datetime(year.categories.astype(str) + "1231", format="%Y%m%d"))
             nday_year = end_year.map(lambda x: x.dayofyear).astype(float)
             dt_year = index - start_year.to_numpy()
             temp_data = (
-                self.temp_delta
-                * np.sin(
-                    (dt_year / pd.Timedelta("1D") - self.time_offset)
-                    * 2
-                    * np.pi
-                    / nday_year
-                )
+                self.temp_delta * np.sin((dt_year / pd.Timedelta("1D") - self.time_offset) * 2 * np.pi / nday_year)
                 + self.temp_mean
             )
             temp_df = pd.Series(data=temp_data, index=index, name="wvp_model_temp")
@@ -318,9 +293,7 @@ class WvpResistanceAccessor:
 
         else:
             temp_aquifer = self.temp_model(index)
-            return self.visc_ratio(temp_aquifer, temp_ref=self.temp_ref).rename(
-                "wvp_model_viscratio"
-            )
+            return self.visc_ratio(temp_aquifer, temp_ref=self.temp_ref).rename("wvp_model_viscratio")
 
     def viscratio(self, index, temp_wvp):
         """Bij 20degC -> 0.8, bij 5degC -> 1.2"""
@@ -371,11 +344,7 @@ class LeidingResistanceAccessor:
     @staticmethod
     def _validate(obj):
         # verify there is a column latitude and a column longitude
-        if (
-            "datum" not in obj.columns
-            or "offset" not in obj.columns
-            or "slope" not in obj.columns
-        ):
+        if "datum" not in obj.columns or "offset" not in obj.columns or "slope" not in obj.columns:
             raise AttributeError("Must have 'datum' and 'offset' and 'slope'.")
 
         # all dates are sorted
@@ -405,9 +374,7 @@ class LeidingResistanceAccessor:
         # a_voor bestaat niet voor eerste datum
         dt = (self.datum[1:] - self.datum[:-1]) / pd.Timedelta(days=1)
 
-        a_voor = np.concatenate(
-            ([np.nan], dt * self.slope[:-1] + self.offset[:-1]), axis=0
-        )
+        a_voor = np.concatenate(([np.nan], dt * self.slope[:-1] + self.offset[:-1]), axis=0)
         return a_voor
 
     @property
@@ -419,9 +386,7 @@ class LeidingResistanceAccessor:
         return self.a_na / self.a_voor
 
     def a_voor_projectie(self, datum_projectie):
-        return self.a_na[-1] + self.slope[-1] * (
-            pd.Timestamp(datum_projectie) - self.datum[-1]
-        ) / pd.Timedelta(days=1)
+        return self.a_na[-1] + self.slope[-1] * (pd.Timestamp(datum_projectie) - self.datum[-1]) / pd.Timedelta(days=1)
 
     def a_na_projectie(self, datum_projectie, method="mean", reductie=None):
         if reductie is None:
@@ -430,7 +395,7 @@ class LeidingResistanceAccessor:
                 reductie = np.nanmean(self.a_effect[1:])
             else:
                 print("Geen schoonmaken die leidingweerstand doen afnemen => geen voorspelde reductie")
-                reductie = 1.
+                reductie = 1.0
 
         return self.a_voor_projectie(datum_projectie) * reductie
 
@@ -448,14 +413,10 @@ class LeidingResistanceAccessor:
         if index[-1] > datums[-1]:
             datums = np.concatenate((datums, index[[-1]]))
 
-        for offset, slope, datum, start, end in zip(
-            self.offset, self.slope, self.datum, datums[:-1], datums[1:]
-        ):
+        for offset, slope, datum, start, end in zip(self.offset, self.slope, self.datum, datums[:-1], datums[1:]):
             d_offset[start:end] = offset
             d_slope[start:end] = slope
-            d_days_since_wzh[start:end] = (
-                d_days_since_wzh[start:end].index - datum
-            ) / pd.Timedelta(days=1)
+            d_days_since_wzh[start:end] = (d_days_since_wzh[start:end].index - datum) / pd.Timedelta(days=1)
 
         # Add only an offset to times before first datum
         d_slope[: datums[0]] = 0.0
@@ -479,7 +440,7 @@ class LeidingResistanceAccessor:
             "datum": dates_new,
             "offset": offsets_new,
             "slope": slopes_new,
-            "gewijzigd": gewijzigd_new
+            "gewijzigd": gewijzigd_new,
         })
 
         values_new = np.insert(self._obj.values, 0, values=df_new.values, axis=0)
@@ -501,10 +462,7 @@ class LeidingResistanceAccessor:
         return self.a_voor_projectie(datum_projectie) * flow**2
 
     def dp_projectie_na(self, datum_projectie, flow, method="mean", reductie=None):
-        return (
-            self.a_na_projectie(datum_projectie, method=method, reductie=reductie)
-            * flow**2
-        )
+        return self.a_na_projectie(datum_projectie, method=method, reductie=reductie) * flow**2
 
     def dp_model(self, index, flow):
         # Verlaging: er komen positieve waarden uit

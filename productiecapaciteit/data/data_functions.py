@@ -13,7 +13,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 #  Winning onderhoud aangepast tot versie 2023-2024
-werkzaamheden_dict = { 
+werkzaamheden_dict = {
     "Q100": [(2017, 40, 41), (2021, 35, 36)],
     "Q200": [(2016, 48, 49), (2020, 43, 44)],
     "Q300": [(2017, 36, 37), (2020, 48, 49)],
@@ -32,14 +32,13 @@ werkzaamheden_dict = {
     "IK94": [(2021, 10, 11), (2022, 7, 8)],
     "IK95": [(2017, 11, 12), (2019, 2, 3), (2019, 49, 49), (2024, 5, 6)],
     "IK96": [(2016, 38, 39), (2020, 49, 50)],
-    "IK101": [(2018, 3, 4), (2022, 4, 5),  (2023, 45, 46)],
+    "IK101": [(2018, 3, 4), (2022, 4, 5), (2023, 45, 46)],
     "IK102": [(2020, 31, 32), (2021, 43, 50)],
     "IK103": [(2018, 6, 7), (2021, 1, 1), (2021, 9, 9)],
     "IK104": [(2015, 48, 49), (2018, 10, 11), (2023, 1, 2)],
     "IK105": [(2016, 44, 45), (2021, 13, 13), (2022, 41, 42), (2023, 49, 50)],
     "IK106": [(2017, 5, 6), (2019, 6, 7), (2020, 6, 6), (2024, 2, 3)],
 }
-
 
 
 def prepare_strang_data(plenty_path, fp_out, config):
@@ -50,9 +49,7 @@ def prepare_strang_data(plenty_path, fp_out, config):
     if not os.path.exists(fp_out):
         plenty_data = read_plenty_excel(plenty_path)
 
-        config_sel_mask = config.PA_tag_prefix.isin(
-            set(s.split("_")[0] for s in plenty_data)
-        )
+        config_sel_mask = config.PA_tag_prefix.isin(set(s.split("_")[0] for s in plenty_data))
         config_sel = config.loc[config_sel_mask]
 
         # Filter noisy vacuumurenteller and compute derivative
@@ -60,9 +57,7 @@ def prepare_strang_data(plenty_path, fp_out, config):
             if f"{c.PA_tag_prefix}_OP20" not in plenty_data:
                 continue
 
-        filters = dw.get_daw_filters(mpcode=config_sel.Dawaco_tag).set_index(
-            "MpCode"
-        )
+        filters = dw.get_daw_filters(mpcode=config_sel.Dawaco_tag).set_index("MpCode")
 
         for mpcode, filtnr in filters.Filtnr.items():
             print(mpcode, ",,,", filtnr)
@@ -71,12 +66,8 @@ def prepare_strang_data(plenty_path, fp_out, config):
 
             ndt = int(timedelta(days=2) / (plenty_data.index[1] - plenty_data.index[0]))
             name_gws, name_gwt = f"gws_{mpcode}_{filtnr}", f"gwt_{mpcode}_{filtnr}"
-            plenty_data[name_gws] = gws.reindex(plenty_data.index).interpolate(
-                "slinear", limit=ndt
-            )
-            plenty_data[name_gwt] = gwt.reindex(plenty_data.index).interpolate(
-                "slinear", limit=ndt
-            )
+            plenty_data[name_gws] = gws.reindex(plenty_data.index).interpolate("slinear", limit=ndt)
+            plenty_data[name_gwt] = gwt.reindex(plenty_data.index).interpolate("slinear", limit=ndt)
 
         plenty_data.reset_index().to_feather(fp_out)
 
@@ -108,24 +99,22 @@ def read_plenty_excel(plenty_path):
         plenty_data["ophaal tijdstip"] = pd.to_datetime(plenty_data["ophaal tijdstip"])
         plenty_data.set_index("ophaal tijdstip", inplace=True)
 
-        if (
-            "index" in plenty_data
-        ):  # in some datasets a column named index falsely appeared
+        if "index" in plenty_data:  # in some datasets a column named index falsely appeared
             del plenty_data["index"]
 
         plenty_data.to_feather(plenty_path_feather)
 
     else:
         plenty_data = pd.read_feather(plenty_path_feather)
-        assert "ophaal tijdstip" == plenty_data.index.name, "Index name is not correct. Most likely the feather file is read using old version of pandas"
+        assert (
+            "ophaal tijdstip" == plenty_data.index.name
+        ), "Index name is not correct. Most likely the feather file is read using old version of pandas"
     return plenty_data
 
 
 def get_knmi_bodemtemperature(fn):
-    bds = pd.read_csv(
-        fn, sep=",", skiprows=16, engine="c", na_values="     "
-    )
-    bds["date"] = pd.to_datetime(bds["YYYYMMDD"], format="%Y%m%d") + bds.HH.astype('timedelta64[h]')
+    bds = pd.read_csv(fn, sep=",", skiprows=16, engine="c", na_values="     ")
+    bds["date"] = pd.to_datetime(bds["YYYYMMDD"], format="%Y%m%d") + bds.HH.astype("timedelta64[h]")
     bds.set_index("date", inplace=True)
     del bds["YYYYMMDD"]
     del bds["HH"]
@@ -146,5 +135,3 @@ def _werkzaamheden_dates():
 
     d = {k: [yr_wk_to_date(*vv) for vv in v] for k, v in werkzaamheden_dict.items()}
     return d
-
-

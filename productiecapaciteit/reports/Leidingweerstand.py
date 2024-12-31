@@ -14,7 +14,7 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
     smooth,
     # get_werkzaamheden_intervals,
     remove_per_from_werkzh_per,
-    werkzaamheden_dates
+    werkzaamheden_dates,
 )
 # from productiecapaciteit.src.
 
@@ -23,7 +23,7 @@ from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceA
 res_folder = os.path.abspath(os.path.join(__file__, "..", "..", "results", "Leidingweerstand"))
 logger_handler = logging.FileHandler(
     os.path.join(res_folder, "Leidingweerstandcoefficient.log"), mode="w"
-)  # , encoding='utf-8', level=logging.DEBUG) res_folder, 
+)  # , encoding='utf-8', level=logging.DEBUG) res_folder,
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
@@ -117,9 +117,7 @@ def analyse_a_leiding(
     """returns df_a"""
     werkzh_datums = list(werkzh_datums)
 
-    _, df_a = get_leiding_slope(
-        df_dP, df_Q, werkzh_datums, slope_val=slope, fit_pt10=fit_pt10
-    )
+    _, df_a = get_leiding_slope(df_dP, df_Q, werkzh_datums, slope_val=slope, fit_pt10=fit_pt10)
 
     if np.all(df_a.leiding.a_effect[1:] <= 1):
         logging.info(f"Effectieve schoonmaken: {werkzh_datums[1:]}")
@@ -130,16 +128,10 @@ def analyse_a_leiding(
         removed = werkzh_datums.pop(idrop)
         logging.info(f"=> Dropping: {removed}. Remaining dates: {werkzh_datums}")
 
-        df_a = analyse_a_leiding(
-            df_dP, df_Q, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope
-        )
+        df_a = analyse_a_leiding(df_dP, df_Q, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 
-    for datum, dp_voor, dp_na in zip(
-        df_a.datum, df_a.leiding.dp_voor(Q_avg), df_a.leiding.dp_na(Q_avg)
-    ):
-        logging.info(
-            f"Schoonmaak van {datum}: Drukval bij mediaan debiet gaat van {dp_voor:.2f}m naar {dp_na:.2f}m"
-        )
+    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.leiding.dp_voor(Q_avg), df_a.leiding.dp_na(Q_avg)):
+        logging.info(f"Schoonmaak van {datum}: Drukval bij mediaan debiet gaat van {dp_voor:.2f}m naar {dp_na:.2f}m")
 
     dp_voor = df_a.leiding.dp_projectie_voor(t_projectie, Q_avg)
     dp_na = df_a.leiding.dp_projectie_na(t_projectie, Q_avg, method="mean")
@@ -192,9 +184,7 @@ for strang, c in config.iterrows():
         # "Little flow"
         # "Niet steady"
     ]
-    untrusted_measurements = get_false_measurements(
-        df, c, extend_hours=1, include_rules=include_rules
-    )
+    untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
 
     df.loc[untrusted_measurements] = np.nan
     df["dP"] = df.P - df.gws0
@@ -204,7 +194,7 @@ for strang, c in config.iterrows():
     # werkzh_per = get_werkzaamheden_intervals(df.dPdQ2.dropna().index, werkzh_fp, strang)
     # werkzh_datums = np.array([i[0] for i in werkzh_per])
     dates = werkzaamheden_dates()[strang]
-    dates = dates[dates>df.dPdQ2.dropna().index[0]]
+    dates = dates[dates > df.dPdQ2.dropna().index[0]]
     werkzh_datums = pd.Index(np.concatenate((df.dPdQ2.dropna().index[[0]].values, dates)))
 
     Q_avg = df.Q.mean()
@@ -225,7 +215,7 @@ for strang, c in config.iterrows():
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
-    plt.style.use(['unhcrpyplotstyle', 'line'])
+    plt.style.use(["unhcrpyplotstyle", "line"])
     fig, (ax, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
     fig.suptitle(strang)
 
@@ -233,9 +223,7 @@ for strang, c in config.iterrows():
     ax.axhline(0, c="black", lw="0.8")
     df_a.leiding.plot_werkzh(ax, werkzh_datums)
     ax.plot(df.index, df["dPdQ2_smooth"], label="dP/dQ2 (dag gem.)")
-    ax.plot(
-        df.index, df_a.leiding.a_model(df.index), label=f"Model {df_a.slope.mean():.3g}"
-    )
+    ax.plot(df.index, df_a.leiding.a_model(df.index), label=f"Model {df_a.slope.mean():.3g}")
     ax.set_ylabel("Verlaging bij Q = 1 m3/h (m)")
     ax.set_ylim(-4 / Q_avg**2, 1 / Q_avg**2)
     ax.set_xlim(df.index[[0, -1]])
@@ -245,9 +233,7 @@ for strang, c in config.iterrows():
     # Gemeten en gemodelleerde verlaging bij gemeten debiet
     ax2.axhline(0, c="black", lw="0.8")
     df_a.leiding.plot_werkzh(ax2, werkzh_datums)
-    ax2.plot(
-        df.index, smooth(df.P - df.gws0, days=1), label="Gemeten verlaging (dag gem.)"
-    )
+    ax2.plot(df.index, smooth(df.P - df.gws0, days=1), label="Gemeten verlaging (dag gem.)")
     ax2.plot(
         df.index,
         df_a.leiding.dp_model(df.index, smooth(df.Q, days=1)),
@@ -284,15 +270,11 @@ for strang, c in config.iterrows():
     logging.info(f"Saved result to {fig_path}")
 
     if 1:
-        res, d2 = get_leiding_slope(
-            df.dP, df.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True
-        )
+        res, d2 = get_leiding_slope(df.dP, df.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True)
         offset = res.x[-1]
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
         ax.scatter(df.Q, df.dP + offset, s=1, c="C0", alpha=0.1)
-        ax.scatter(
-            df.Q, d2.leiding.dp_model(df.index, flow=df.Q), s=1, c="C1", alpha=0.1
-        )
+        ax.scatter(df.Q, d2.leiding.dp_model(df.index, flow=df.Q), s=1, c="C1", alpha=0.1)
         fig.suptitle(strang + f": inclusief offset {offset:.2f}m")
         fig_path = os.path.join(res_folder, f"pt10offset - {strang}.png")
         fig.savefig(fig_path, dpi=300)

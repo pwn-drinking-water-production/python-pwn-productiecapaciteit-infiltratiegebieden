@@ -14,15 +14,9 @@ config_fn = "strang_props6.xlsx"
 config = get_config(os.path.join(data_fd, config_fn))
 config = config.loc[:, config.columns.notna()]
 
-filterweerstand_fp = os.path.join(
-    "..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx"
-)
-leidingweerstand_fp = os.path.join(
-    "..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx"
-)
-wvpweerstand_fp = os.path.join(
-    "..", "results", "Wvpweerstand", "Wvpweerstand_modelcoefficienten.xlsx"
-)
+filterweerstand_fp = os.path.join("..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx")
+leidingweerstand_fp = os.path.join("..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx")
+wvpweerstand_fp = os.path.join("..", "results", "Wvpweerstand", "Wvpweerstand_modelcoefficienten.xlsx")
 
 date_goal = pd.Timestamp("2024-07-01")
 date_clean = "2023-11-01"
@@ -37,9 +31,7 @@ for strang, c in config.iterrows():
 
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
     df_a_leiding = pd.read_excel(leidingweerstand_fp, sheet_name=strang)
-    df_a_wvp = pd.read_excel(wvpweerstand_fp, sheet_name=strang, index_col=0).squeeze(
-        "columns"
-    )
+    df_a_wvp = pd.read_excel(wvpweerstand_fp, sheet_name=strang, index_col=0).squeeze("columns")
 
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
     effect_som, effect_dict = weerstand.report_capaciteit_effect_schoonmaak(date_clean, [date_goal])

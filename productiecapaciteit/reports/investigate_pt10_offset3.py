@@ -71,9 +71,9 @@ def get_leiding_slope_per_year2(df_, periods, freq="3H", Q=None, slope=None):
 
     a_approx = -(df.dP_leiding / df.Q**2).median()
     dx_days = (dP.index - dP.index[0]) / timedelta(days=1)
-    slope_approx = (
-        np.sum(dx_days * dP) - dP.size * np.median(dx_days) * np.median(dP)
-    ) / (np.sum(dx_days * dx_days) - dP.size * np.median(dx_days) * np.median(dx_days))
+    slope_approx = (np.sum(dx_days * dP) - dP.size * np.median(dx_days) * np.median(dP)) / (
+        np.sum(dx_days * dx_days) - dP.size * np.median(dx_days) * np.median(dx_days)
+    )
     x0 = [0.0, -5e-9] + nper * [a_approx]
 
     bounds_ = (
@@ -155,9 +155,7 @@ def analyse_a_leiding_voordeel_schoonmaak(
     else:
         tend = m_a[~m_a.isna()].index[-1]
         end = m_a[~m_a.isna()][-1]
-        projected_voor = end + slope * (
-            pd.Timestamp(t_projectie) - tend
-        ) / pd.Timedelta(days=1)
+        projected_voor = end + slope * (pd.Timestamp(t_projectie) - tend) / pd.Timedelta(days=1)
         projected_na = projected_voor * (100 + mean_result) / 100
 
         projected_dP_voor = projected_voor * Q_avg**2
@@ -169,9 +167,7 @@ def analyse_a_leiding_voordeel_schoonmaak(
         return np.array(m_a_red_frac_result), (projected_voor, projected_na)
 
 
-def analyse_a_leiding(
-    df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 00:00:00", slope=None
-):
+def analyse_a_leiding(df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 00:00:00", slope=None):
     """
     *  0 : a constraint is not active.
     * -1 : a lower bound is active.
@@ -202,13 +198,9 @@ def analyse_a_leiding(
         werkzh_per = remove_per_from_werkzh_per(werkzh_per, idrop)
         logging.info(f"Remaining periods {werkzh_per}")
 
-        res, dP_leiding_model = get_leiding_slope_per_year2(
-            df, werkzh_per, freq="1H", Q=Q_avg, slope=slope
-        )
+        res, dP_leiding_model = get_leiding_slope_per_year2(df, werkzh_per, freq="1H", Q=Q_avg, slope=slope)
 
-        gains, projected, werkzh_per = analyse_a_leiding(
-            df, res, werkzh_per, Q_avg=Q_avg, t_projectie=t_projectie
-        )
+        gains, projected, werkzh_per = analyse_a_leiding(df, res, werkzh_per, Q_avg=Q_avg, t_projectie=t_projectie)
     else:
         logging.info("Alle schoonmaken hebben zin")
 
@@ -252,15 +244,11 @@ for strang, c in config.iterrows():
         # "Little flow"
         # "Niet steady"
     ]
-    untrusted_measurements = get_false_measurements(
-        df, c, extend_hours=1, include_rules=include_rules
-    )
+    untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
     df.loc[untrusted_measurements] = np.nan
     df["dP_leiding"] = smooth(df.P - df.gws0, days=0.5)
 
-    werkzh_per = get_werkzaamheden_intervals(
-        df.dP_leiding.dropna().index, werkzh_fp, strang
-    )
+    werkzh_per = get_werkzaamheden_intervals(df.dP_leiding.dropna().index, werkzh_fp, strang)
     pers = np.array([i[0] for i in werkzh_per][1:])
 
     # bonus mask
@@ -272,9 +260,7 @@ for strang, c in config.iterrows():
     Q_fit = df.Q.median()
 
     # sv_out_ = get_leiding_slope_per_year1(df, starting_values[strang], freq='6H')
-    res, dP_leiding_model = get_leiding_slope_per_year2(
-        df, werkzh_per, freq="1H", Q=Q_fit, slope=c.leiding_a_slope
-    )
+    res, dP_leiding_model = get_leiding_slope_per_year2(df, werkzh_per, freq="1H", Q=Q_fit, slope=c.leiding_a_slope)
     if res is None:
         logging.info("FAILED")
         continue
@@ -288,9 +274,7 @@ for strang, c in config.iterrows():
         t_projectie="2023-10-31 00:00:00",
         slope=c.leiding_a_slope,
     )
-    res, dP_leiding_model = get_leiding_slope_per_year2(
-        df, werkzh_per2, freq="1H", Q=Q_fit, slope=c.leiding_a_slope
-    )
+    res, dP_leiding_model = get_leiding_slope_per_year2(df, werkzh_per2, freq="1H", Q=Q_fit, slope=c.leiding_a_slope)
     pers2 = np.array([i[0] for i in werkzh_per2][1:])
 
     # Plot results of werkzh that matter
@@ -339,12 +323,8 @@ for strang, c in config.iterrows():
     )
     axs[0].set_ylim((-4, 0))
     axs[1].set_ylim((-4, 0))
-    fig.savefig(
-        os.path.join(res_path, f"Leidingweerstandcoefficient - {strang}.png"), dpi=300
-    )
-    logging.info(
-        f"Saved result to {os.path.join('Resultaat', f'Leidingweerstandcoefficient - {strang}.png')}"
-    )
+    fig.savefig(os.path.join(res_path, f"Leidingweerstandcoefficient - {strang}.png"), dpi=300)
+    logging.info(f"Saved result to {os.path.join('Resultaat', f'Leidingweerstandcoefficient - {strang}.png')}")
 
     plt.show()
 
