@@ -1,32 +1,26 @@
-import logging
-import os
-
 import matplotlib.pyplot as plt
-import matplotlib.font_manager
 import pandas as pd
 
-from productiecapaciteit.src.strang_analyse_fun2 import get_config
+from productiecapaciteit import results_dir
 from productiecapaciteit.src.capaciteit_strang import strangWeerstand
+from productiecapaciteit.src.strang_analyse_fun2 import get_config
+from productiecapaciteit.src.weerstand_pandasaccessors import (
+    LeidingResistanceAccessor,  # noqa: F401
+    WellResistanceAccessor,  # noqa: F401
+    WvpResistanceAccessor,  # noqa: F401
+)
 
-from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor
-
-res_folder = os.path.join("..", "results", "Synthese", "Capaciteit")
-
-data_fd = os.path.join("..", "Data")
-config_fn = "strang_props6.xlsx"
-config = get_config(os.path.join(data_fd, config_fn))
+config = get_config()
 config = config.loc[:, config.columns.notna()]
 
-filterweerstand_fp = os.path.join("..", "results", "Filterweerstand", "Filterweerstand_modelcoefficienten.xlsx")
-leidingweerstand_fp = os.path.join("..", "results", "Leidingweerstand", "Leidingweerstand_modelcoefficienten.xlsx")
-wvpweerstand_fp = os.path.join("..", "results", "Wvpweerstand", "Wvpweerstand_modelcoefficienten.xlsx")
+filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoefficienten.xlsx"
+leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"
+wvpweerstand_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficienten.xlsx"
 
-index = pd.date_range("2012-05-01", "2023-01-01")
+index = pd.date_range("2012-05-01", "2025-12-31")
 
-w_all = dict()
-w_offset = {k: dict() for k in [-3, -2, -1, 0, 1, 2, 3]}
+w_all = {}
+w_offset: dict[int, dict] = {k: {} for k in [-3, -2, -1, 0, 1, 2, 3]}
 
 for strang, c in config.iterrows():
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang, index_col=0)
@@ -42,17 +36,16 @@ for strang, c in config.iterrows():
 lims = pd.DataFrame({k: v.capaciteit(index) for k, v in w_all.items()})
 pd.DataFrame({k: v.capaciteit(index) for k, v in w_all.items()}).plot.area()
 
-fig_path = os.path.join(res_folder, f"Capaciteit Som - {strang}.png")
+fig_path = results_dir / "Synthese" / "Capaciteit" / "Capaciteit Som.png"
 plt.savefig(fig_path, dpi=300)
 
 """
 Effect opwarming
 """
 plt.style.use(["unhcrpyplotstyle", "line"])
-res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
 
-lims_sum_dict = dict()
-lims_offset = dict()
+lims_sum_dict = {}
+lims_offset = {}
 for temp_opwarming, wi in w_offset.items():
     lims = pd.DataFrame({k: v.capaciteit(index) for k, v in wi.items()})
     lims_offset[temp_opwarming] = lims
@@ -71,18 +64,16 @@ ax.legend(loc=(0, 1), ncol=7)
 ax.set_ylabel("Toename in productiecap. (%)")
 fig.tight_layout()
 
-fig_path = os.path.join(res_folder, f"Effect opwarming.png")
+fig_path = results_dir / "Synthese" / "Opwarming" / "Effect opwarming.png"
 fig.savefig(fig_path, dpi=300)
-
 
 """
 Effect opwarming zoom
 """
 plt.style.use(["unhcrpyplotstyle", "line"])
-res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
 
-lims_sum_dict = dict()
-lims_offset = dict()
+lims_sum_dict = {}
+lims_offset = {}
 for temp_opwarming, wi in w_offset.items():
     lims = pd.DataFrame({k: v.capaciteit(index) for k, v in wi.items()})
     lims_offset[temp_opwarming] = lims
@@ -102,27 +93,23 @@ ax.set_ylabel("Toename in productiecap. (%)")
 ax.set_xlim(("2021-01-01", "2022-01-01"))
 fig.tight_layout()
 
-fig_path = os.path.join(res_folder, f"Effect opwarming zoom.png")
+fig_path = results_dir / "Synthese" / "Opwarming" / "Effect opwarming zoom.png"
 fig.savefig(fig_path, dpi=300)
-
 
 """
 Effect opwarming zoom except pompcapaciteit
-
-            {
-                "Pompcapaciteit": self.Qpomp,
-                "Vacuumsysteem": self.lim_vac(index),
-                "Luchthappen": self.lim_luchthap(index),
-                "Verblijftijd": self.lim_verblijf(index),
-            }
-            
+{
+    "Pompcapaciteit": self.Qpomp,
+    "Vacuumsysteem": self.lim_vac(index),
+    "Luchthappen": self.lim_luchthap(index),
+    "Verblijftijd": self.lim_verblijf(index),
+}
 """
 plt.style.use(["unhcrpyplotstyle", "line"])
-res_folder = os.path.join("..", "results", "Synthese", "Opwarming")
 use_lims = ["Vacuumsysteem", "Luchthappen", "Verblijftijd"]
 
-lims_sum_dict = dict()
-lims_offset = dict()
+lims_sum_dict = {}
+lims_offset = {}
 for temp_opwarming, wi in w_offset.items():
     lims = pd.DataFrame({k: v.capaciteit(index, use_lims=use_lims) for k, v in wi.items()})
     lims_offset[temp_opwarming] = lims
@@ -142,8 +129,6 @@ ax.set_ylabel("Toename in productiecap. (%)")
 ax.set_xlim(("2021-01-01", "2022-01-01"))
 fig.tight_layout()
 
-fig_path = os.path.join(res_folder, f"Effect opwarming zoom - geen pomplimiet.png")
+fig_path = results_dir / "Synthese" / "Opwarming" / "Effect opwarming zoom - geen pomplimiet.png"
 fig.savefig(fig_path, dpi=300)
-
-
 print("hoi")
