@@ -55,11 +55,6 @@ def prepare_strang_data(plenty_path, fp_out, config):
         config_sel_mask = config.PA_tag_prefix.isin(set(s.split("_")[0] for s in plenty_data))
         config_sel = config.loc[config_sel_mask]
 
-        # Filter noisy vacuumurenteller and compute derivative
-        for strang, c in config_sel.iterrows():
-            if f"{c.PA_tag_prefix}_OP20" not in plenty_data:
-                continue
-
         filters = dw.get_daw_filters(mpcode=config_sel.Dawaco_tag).set_index("MpCode")
 
         for mpcode, filtnr in filters.Filtnr.items():
@@ -105,13 +100,14 @@ def read_plenty_excel(plenty_path):
         if "index" in plenty_data:  # in some datasets a column named index falsely appeared
             del plenty_data["index"]
 
-        plenty_data.to_feather(plenty_path_feather)
+        plenty_data.reset_index().to_feather(plenty_path_feather)
 
     else:
         plenty_data = pd.read_feather(plenty_path_feather)
-        assert (
-            "ophaal tijdstip" == plenty_data.index.name
-        ), "Index name is not correct. Most likely the feather file is read using old version of pandas"
+
+        if "ophaal tijdstip" in plenty_data.columns:
+            plenty_data.set_index("ophaal tijdstip", inplace=True)
+
     return plenty_data
 
 

@@ -14,54 +14,51 @@ from datetime import timedelta
 import dawacotools as dw
 import numpy as np
 import pandas as pd
+from data_functions import get_knmi_bodemtemperature, prepare_strang_data, read_plenty_excel
 
-from data_functions import get_knmi_bodemtemperature
-from data_functions import prepare_strang_data
-from data_functions import read_plenty_excel
+from productiecapaciteit import data_dir
 from productiecapaciteit.src.strang_analyse_fun2 import get_config
 
-data_fd = os.path.join(__file__, "..")
-config_fn = "strang_props6.xlsx"
-config = get_config(os.path.join(data_fd, config_fn))
+config = get_config()
 
-bodemtemp_fn = os.path.join(data_fd, "bodemtemps_260.txt")
+bodemtemp_fn = os.path.join(data_dir, "bodemtemps_260.txt")
 bodemtemp = get_knmi_bodemtemperature(bodemtemp_fn)
 
-fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_ICAS sec Q")
-fp_out = os.path.join(data_fd, "Plenty", "Q.feather")
-prepare_strang_data(fp_in, fp_out, config)
-
-fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_ICAS sec P")
-fp_out = os.path.join(data_fd, "Plenty", "P.feather")
-prepare_strang_data(fp_in, fp_out, config)
-
-# fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_IKIEF sec 09")
-# fp_out = os.path.join(data_fd, "Plenty", "09.feather")
+# fp_in = os.path.join(data_dir, "Plenty", "PREP2XL_v122_ICAS sec Q")
+# fp_out = os.path.join(data_dir, "Plenty", "Q.feather")
 # prepare_strang_data(fp_in, fp_out, config)
 
-# fp_in = os.path.join(data_fd, "Plenty", "PREP2XL_v122_IKIEF sec 10")
-# fp_out = os.path.join(data_fd, "Plenty", "10.feather")
+# fp_in = os.path.join(data_dir, "Plenty", "PREP2XL_v122_ICAS sec P")
+# fp_out = os.path.join(data_dir, "Plenty", "P.feather")
 # prepare_strang_data(fp_in, fp_out, config)
+
+fp_in = os.path.join(data_dir, "Plenty", "PREP2XL_v122_IKIEF sec 09")
+fp_out = os.path.join(data_dir, "Plenty", "09.feather")
+prepare_strang_data(fp_in, fp_out, config)
+
+fp_in = os.path.join(data_dir, "Plenty", "PREP2XL_v122_IKIEF sec 10")
+fp_out = os.path.join(data_dir, "Plenty", "10.feather")
+prepare_strang_data(fp_in, fp_out, config)
 
 infil_temp = dw.get_daw_ts_temp(mpcode="19CZL5132", filternr=1)  # See infiltration_temperature.py
 
-pandpeil_fp = os.path.join(data_fd, "Plenty", "PREP2XL_v122_pandpeilen")
+pandpeil_fp = os.path.join(data_dir, "Plenty", "PREP2XL_v122_pandpeilen")
 pandpeil = read_plenty_excel(pandpeil_fp)
 
 for strang, c in config.iterrows():
-    if "IK" in strang:
+    if "P" in strang or "Q" in strang or "IK1" in strang:
         continue
     print(strang)
 
     if "Q" in strang:
-        fp_out = os.path.join(data_fd, "Plenty", "Q.feather")
+        fp_out = os.path.join(data_dir, "Plenty", "Q.feather")
     elif "P" in strang:
-        fp_out = os.path.join(data_fd, "Plenty", "P.feather")
+        fp_out = os.path.join(data_dir, "Plenty", "P.feather")
     elif "9" in strang:
-        fp_out = os.path.join(data_fd, "Plenty", "09.feather")
+        fp_out = os.path.join(data_dir, "Plenty", "09.feather")
 
     elif "10" in strang:
-        fp_out = os.path.join(data_fd, "Plenty", "10.feather")
+        fp_out = os.path.join(data_dir, "Plenty", "10.feather")
 
     df = prepare_strang_data("", fp_out, config)
     if "index" in df:  # in some datasets a column named index falsely appeared
@@ -100,6 +97,6 @@ for strang, c in config.iterrows():
         df_out[f"gwt{i}"] = df[f"gwt_{c.Dawaco_tag}_{i}"]
 
     df_out.index.rename("Datum", inplace=True)
-    df_out.reset_index().to_feather(os.path.join(data_fd, "Merged", f"{strang}.feather"))
+    df_out.reset_index().to_feather(os.path.join(data_dir, "Merged", f"{strang}.feather"))
 
 print("hoi")
