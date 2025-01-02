@@ -7,12 +7,15 @@
 """
 
 import os
-import dawacotools as dw
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
 
-#  Winning onderhoud aangepast tot versie 2023-2024
+import dawacotools as dw
+import numpy as np
+import pandas as pd
+
+# vanaf najaar 2015 uit Sander Uitendaal's schemas
+# Tussen najaar 2012 en najaar 2015 schatting uit SAP lijst van Gerhard
+# Winning onderhoud aangepast tot versie 2023-2024. Uit planning winningen 2023-2024.xlsx van Sander Uitendaal.
 werkzaamheden_dict = {
     "Q100": [(2017, 40, 41), (2021, 35, 36)],
     "Q200": [(2016, 48, 49), (2020, 43, 44)],
