@@ -4,7 +4,7 @@
 3. Update bodemtemps_260.txt
 4. Check the content of config_fn, e.g., number of wells etc.
 5. Run dit bestand
-6. Update Werkzaamheden.xlsx (Gerhard Coetzee)
+6. Update Werkzaamheden
 
 """
 
@@ -46,8 +46,11 @@ pandpeil_fp = os.path.join(data_dir, "Plenty", "PREP2XL_v122_pandpeilen")
 pandpeil = read_plenty_excel(pandpeil_fp)
 
 for strang, c in config.iterrows():
-    if "P" in strang or "Q" in strang or "IK1" in strang:
+    # if "P" in strang or "Q" in strang or "IK1" in strang:
+    #     continue
+    if strang != "IK96":
         continue
+
     print(strang)
 
     if "Q" in strang:

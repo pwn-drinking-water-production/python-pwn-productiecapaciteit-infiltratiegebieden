@@ -9,8 +9,6 @@ from productiecapaciteit import data_dir
 from productiecapaciteit.data.data_functions import werkzaamheden_dict
 
 
-
-
 def werkzaamheden_dates():
     def yr_wk_to_date(year, wk_start, wk_end):
         date_start = datetime.strptime(f"{year}-W{wk_start}-1", "%G-W%V-%u")

@@ -9,6 +9,7 @@ GitHub desktop applicatie > File > Clone repository... en selecteer bdestombe/py
 
 # Werkprotocol
  - Bereid de data voor. See `data/prepare_data.py`
+ - Controleer de PT10 hoogteuitlijning: `reports/investigate_pt10_offset4.py` Waarden vastgelegd in `strang_props.csv`: `PA_tag_hleiding`.
  - Bereken de weerstandsmodellen
    - Leidingweerstand: `reports/Leidingweerstand.py`
    - Putfilterweerstand: `reports/putfilter3.py`
