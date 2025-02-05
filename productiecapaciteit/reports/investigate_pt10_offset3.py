@@ -7,15 +7,13 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from strang_analyse_fun2 import (
+from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
     model_a_leiding,
-    get_werkzaamheden_intervals,
     remove_per_from_werkzh_per,
 )
-
-res_path = os.path.join("Resultaat", "PT10offset")
+res_path = os.path.abspath(os.path.join(__file__, "..", "..", "results", "PT10offset"))
 logger_handler = logging.FileHandler(
     os.path.join(res_path, "Leidingweerstandcoefficient.log"), mode="w"
 )  # , encoding='utf-8', level=logging.DEBUG)
@@ -103,7 +101,7 @@ temp_ref = 12.0
 fig_folder = os.path.join("Resultaat")
 
 data_fd = os.path.join("..", "Data")
-config_fn = "strang_props6.xlsx"
+config_fn = "strang_props7.csv"
 config = get_config(os.path.join(data_fd, config_fn))
 gridspec_kw = {
     "left": 0.07,
@@ -223,7 +221,7 @@ def remove_per_from_werkzh_per(werkzh_per, idrop):
 
 
 for strang, c in config.iterrows():
-    if strang != "IK104":
+    if strang != "IK96":
         continue
 
     # print(strang)
@@ -232,8 +230,7 @@ for strang, c in config.iterrows():
 
     logging.info(f"Strang: {strang}")
 
-    # df_fp = os.path.join(data_fd, "Merged", f"{strang}.feather")
-    df_fp = os.path.join(data_fd, "Merged", f"{strang}-PKA-DSEW036680.feather")
+    df_fp = os.path.join(data_fd, "Merged", f"{strang}.feather")
     df = pd.read_feather(df_fp)
     df["Datum"] = pd.to_datetime(df["Datum"])
     df.set_index("Datum", inplace=True)

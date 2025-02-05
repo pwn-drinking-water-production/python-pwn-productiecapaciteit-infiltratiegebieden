@@ -36,8 +36,8 @@ filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoe
 leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"
 wvpweerstand_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficienten.xlsx"
 
-index = pd.date_range("2012-05-01", "2025-12-31")
-date_goal = pd.Timestamp("2025-10-01")
+index = pd.date_range("2012-05-01", "2026-12-31")
+date_goal = pd.Timestamp("2025-12-01")
 
 for strang, c in config.iterrows():
     # if strang != "IK95":
@@ -48,7 +48,7 @@ for strang, c in config.iterrows():
     df_a_wvp = pd.read_excel(wvpweerstand_fp, sheet_name=strang, index_col=0).squeeze("columns")
 
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
-    date_clean = "2025-04-01"
+    date_clean = "2025-10-01"
 
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw=gridspec_kw)
     fig.suptitle(

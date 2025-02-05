@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from productiecapaciteit import data_dir
+from productiecapaciteit import data_dir, plot_styles_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
@@ -37,6 +37,9 @@ logging.basicConfig(
     handlers=[logger_handler, stdout],
 )
 
+# plt.style.use(["unhcrpyplotstyle", "line"])
+plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
+plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
 
 def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
     mask = np.logical_and(np.isfinite(df_dP_), np.isfinite(df_Q_))
@@ -58,8 +61,7 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
     def cost2(theta):
         if fit_pt10:
             return (fun(theta[:-1]) - theta[-1] - df_dP) ** 2
-        else:
-            return (fun(theta) - df_dP) ** 2
+        return (fun(theta) - df_dP) ** 2
 
     a_approx = min((df_dP / df_Q.clip(lower=1) ** 2).median() / 2, -1e-8)
 
@@ -72,8 +74,10 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
         bounds_ = ([slope_val * 10, slope_val / 10], *(nper * ([a_approx * 100, 0],)))
 
     if fit_pt10:
-        x0 += [0.0]
-        bounds_ = (*bounds_, [-2.0, 2.0])
+        show_small_flows = df_Q < 1.0
+        offset_est = df_dP_[show_small_flows].median() if np.any(show_small_flows) else 0.0
+        x0 += [offset_est]
+        bounds_ = (*bounds_, [offset_est - 2.0, offset_est + 2.0])
 
     bounds = np.array(bounds_).T
 
@@ -148,6 +152,7 @@ def analyse_a_leiding(
 
 
 temp_ref = 12.0
+t_projectie = "2025-10-31 00:00:00"
 
 fig_folder = os.path.join("Resultaat")
 
@@ -165,7 +170,7 @@ df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang:
     #     continue
-    # if strang != 'P100':
+    # if strang != 'IK96':
     #     continue
 
     # print(strang)
@@ -176,11 +181,12 @@ for strang, c in config.iterrows():
 
     df_fp = data_dir / "Merged" / f"{strang}.feather"
     df = pd.read_feather(df_fp).set_index("Datum")
+    isspui = df.spui > 2.0
 
     include_rules = [
         "Unrealistic flow",
         "Tijdens spuien",
-        "Little flow",
+        # "Little flow",
         # "Niet steady"
     ]
     untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
@@ -191,18 +197,20 @@ for strang, c in config.iterrows():
     df["dPdQ2_smooth"] = smooth(df.dPdQ2, days=0.5)
 
     dates = werkzaamheden_dates()[strang]
+
+    # prepend first non-nan date
     dates = dates[dates > df.dPdQ2.dropna().index[0]]
     werkzh_datums = pd.Index(np.concatenate((df.dPdQ2.dropna().index[[0]].values, dates)))
 
     Q_avg = df.Q.mean()
-    slope = c.leiding_a_slope
+    slope = c.leiding_a_slope  # Use as starting value in optimization
 
     df_a = analyse_a_leiding(
         df.dP,
         df.Q,
         werkzh_datums,
         Q_avg,
-        t_projectie="2023-10-31 00:00:00",
+        t_projectie=t_projectie,
         slope=slope,
         fit_pt10=False,
     )
@@ -212,11 +220,12 @@ for strang, c in config.iterrows():
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
-    plt.style.use(["unhcrpyplotstyle", "line"])
     fig, (ax, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
     fig.suptitle(strang)
 
     # Leidingweerstand coeff
+    ax.fill_between(df.index, 0, 1, where=isspui, color='green', alpha=0.4, transform=ax.get_xaxis_transform(), label="Spuien", linewidth=1.5)
+
     ax.axhline(0, c="black", lw="0.8")
     df_a.leiding.plot_werkzh(ax, werkzh_datums)
     ax.plot(df.index, df["dPdQ2_smooth"], label="dP/dQ2 (dag gem.)")
@@ -226,6 +235,7 @@ for strang, c in config.iterrows():
     ax.set_xlim(df.index[[0, -1]])
     # ax.legend(fontsize="small")
     ax.legend(loc=(0.05, 1), ncol=4)
+
 
     # Gemeten en gemodelleerde verlaging bij gemeten debiet
     ax2.axhline(0, c="black", lw="0.8")
@@ -266,7 +276,7 @@ for strang, c in config.iterrows():
     fig.savefig(fig_path, dpi=300)
     logging.info(f"Saved result to {fig_path}")
 
-    if 1:
+    if 0:
         res, d2 = get_leiding_slope(df.dP, df.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True)
         offset = res.x[-1]
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)

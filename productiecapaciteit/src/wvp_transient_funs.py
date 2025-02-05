@@ -1,5 +1,5 @@
 import asyncio
-import functools
+
 import numpy as np
 import pandas as pd
 from scipy.special import k0, lambertw
@@ -95,7 +95,7 @@ def objective(args, return_result=False, **pextra):
             )
         ]
 
-        if "multiwell" in pextra and pextra["multiwell"]:
+        if pextra.get("multiwell"):
             for multi, distance in pextra["multiwell"]:
                 grouper_list.append(
                     asyncio.get_event_loop().run_in_executor(
@@ -134,7 +134,8 @@ def background(f):
 
 # @background
 def hantush(alpha, beta, kD, **pextra):
-    """
+    """Compute the drawdown for a single well using the Hantush well function.
+
     alpha = (r**2 * S / 4) ** 0.5
     beta = (1 / (c * S)) ** 0.5
 
@@ -199,9 +200,9 @@ def expint(u):
     gamma = 0.57721566490153286060  # Euler-Macheroni constant
 
     out = np.zeros_like(u, dtype=float)
-    show = u < 1
+    show = u < 1.0
     out[show] = np.log(np.exp(-gamma) / u[show]) + 0.9653 * u[show] - 0.1690 * u[show] ** 2
-    show2 = np.logical_and(~show, u < 20)
+    show2 = np.logical_and(~show, u < 20.0)
     out[show2] = 1.0 / (u[show2] * np.exp(u[show2])) * (u[show2] + 0.3575) / (u[show2] + 1.280)
     return out
 
