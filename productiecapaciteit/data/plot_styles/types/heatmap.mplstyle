@@ -1,0 +1,3 @@
+# TICKS
+xtick.labelbottom:   True
+ytick.labelleft:     True

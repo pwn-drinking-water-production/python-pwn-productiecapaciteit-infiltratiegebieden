@@ -1,0 +1,6 @@
+# AXES
+axes.spines.left:    True
+
+# TICKS
+ytick.labelleft:     True
+
