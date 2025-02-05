@@ -8,7 +8,7 @@ import pandas as pd
 from scipy.linalg import svd
 from scipy.optimize import least_squares
 
-from productiecapaciteit import data_dir, plot_styles_dir
+from productiecapaciteit import data_dir, plot_styles_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
@@ -17,9 +17,9 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
 )
 from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor  # noqa: F401
 
-res_folder = os.path.abspath(os.path.join(__file__, "..", "..", "results", "Leidingweerstand"))
+res_folder = results_dir / "Leidingweerstand"
 logger_handler = logging.FileHandler(
-    os.path.join(res_folder, "Leidingweerstandcoefficient.log"), mode="w"
+    results_dir / "Leidingweerstand" / "Leidingweerstandcoefficient.log", mode="w"
 )  # , encoding='utf-8', level=logging.DEBUG) res_folder,
 stdout = logging.StreamHandler()
 logging.basicConfig(
@@ -168,7 +168,7 @@ gridspec_kw = {
     "wspace": 0.3,
     "hspace": 0.3,
 }
-df_a_fp = os.path.join(res_folder, "Leidingweerstand_modelcoefficienten.xlsx")
+df_a_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"
 
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang:
@@ -210,7 +210,7 @@ for strang, c in config.iterrows():
         show1 = df.Q < 1.0
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
         ax.scatter(df.index[show1], df.dP[show1], s=1, c="C0", alpha=0.2)
-        fig_path = os.path.join(res_folder, f"pt10offset - timeseries - {strang}.png")
+        fig_path = results_dir / "PT10offset" / f"pt10offset - timeseries - {strang}.png"
         fig.savefig(fig_path, dpi=300)
         continue
 
@@ -227,82 +227,5 @@ for strang, c in config.iterrows():
         fit_pt10=True,
     )
     continue
-    # res, d2 = get_leiding_slope(group.dP, group.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True)
-
-    df_a["gewijzigd"] = pd.Timestamp.now()
-    df_a = df_a.leiding.add_zero_effect_dates(dates)
-    with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
-        df_a.to_excel(writer, sheet_name=strang)
-
-    if 0:
-        fig, (ax, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
-        fig.suptitle(strang)
-
-        # Leidingweerstand coeff
-        ax.fill_between(df.index, 0, 1, where=isspui, color='green', alpha=0.4, transform=ax.get_xaxis_transform(), label="Spuien", linewidth=1.5)
-
-        ax.axhline(0, c="black", lw="0.8")
-        df_a.leiding.plot_werkzh(ax, werkzh_datums)
-        ax.plot(df.index, df["dPdQ2_smooth"], label="dP/dQ2 (dag gem.)")
-        ax.plot(df.index, df_a.leiding.a_model(df.index), label=f"Model {df_a.slope.mean():.3g}")
-        ax.set_ylabel("Verlaging bij Q = 1 m3/h (m)")
-        ax.set_ylim(-4 / Q_avg**2, 1 / Q_avg**2)
-        ax.set_xlim(df.index[[0, -1]])
-        # ax.legend(fontsize="small")
-        ax.legend(loc=(0.05, 1), ncol=4)
-
-
-        # Gemeten en gemodelleerde verlaging bij gemeten debiet
-        ax2.axhline(0, c="black", lw="0.8")
-        df_a.leiding.plot_werkzh(ax2, werkzh_datums)
-        ax2.plot(df.index, smooth(df.P - df.gws0, days=1), label="Gemeten verlaging (dag gem.)")
-        ax2.plot(
-            df.index,
-            df_a.leiding.dp_model(df.index, smooth(df.Q, days=1)),
-            label=f"Model {df_a.slope.mean():.3g}",
-        )
-        ax2.set_ylim(-4, 1)
-        ax2.set_xlim(df.index[[0, -1]])
-        ax2.set_ylabel(f"Verlaging bij gemeten Q (m)")
-        # ax2.legend(fontsize="small")
-        ax2.legend(loc=(0, 1), ncol=4)
-
-        # Gemeten en gemodelleerde verlaging bij gem debiet
-        ax3.axhline(0, c="black", lw="0.8")
-        df_a.leiding.plot_werkzh(ax3, werkzh_datums)
-
-        ax3.plot(
-            df.index,
-            smooth((df.P - df.gws0) / df.Q**2 * Q_avg**2, days=1),
-            label="Gemeten verlaging (dag gem.)",
-        )
-        ax3.plot(
-            df.index,
-            df_a.leiding.dp_model(df.index, Q_avg),
-            label=f"Model {df_a.slope.mean():.3g}",
-        )
-        ax3.set_ylim(-4, 1)
-        ax3.set_xlim(df.index[[0, -1]])
-        ax3.set_ylabel(f"Verlaging bij Q={Q_avg:.0f} m3/h (m)")
-        # ax3.legend(fontsize="small")
-        ax3.legend(loc=(0, 1), ncol=4)
-
-        fig_path = os.path.join(res_folder, f"Leidingweerstandcoefficient - {strang}.png")
-        fig.savefig(fig_path, dpi=300)
-        logging.info(f"Saved result to {fig_path}")
-
-    if 0:
-        for year, group in df.groupby(df.index.year):
-            res, d2 = get_leiding_slope(group.dP, group.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True)
-            if not res.success:
-                logging.error(f"Optimization failed for year {year}")
-                continue
-            offset = res.x[-1]
-            fig, ax = plt.subplots(1, 1, figsize=(12, 9), gridspec_kw=gridspec_kw)
-            ax.scatter(group.Q, group.dP + offset, s=1, c="C0", alpha=0.1)
-            ax.scatter(group.Q, d2.leiding.dp_model(group.index, flow=group.Q), s=1, c="C1", alpha=0.1)
-            fig.suptitle(strang + f": inclusief offset {offset:.2f}m. year {year}")
-        # fig_path = os.path.join(res_folder, f"pt10offset - {strang}.png")
-        # fig.savefig(fig_path, dpi=300)
 
 print("hoi")
