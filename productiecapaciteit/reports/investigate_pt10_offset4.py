@@ -20,7 +20,7 @@ from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceA
 res_folder = results_dir / "Leidingweerstand"
 logger_handler = logging.FileHandler(
     results_dir / "Leidingweerstand" / "Leidingweerstandcoefficient.log", mode="w"
-)  # , encoding='utf-8', level=logging.DEBUG) res_folder,
+)
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
