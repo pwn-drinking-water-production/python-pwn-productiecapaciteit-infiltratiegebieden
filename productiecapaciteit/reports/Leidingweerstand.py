@@ -37,7 +37,6 @@ logging.basicConfig(
     handlers=[logger_handler, stdout],
 )
 
-# plt.style.use(["unhcrpyplotstyle", "line"])
 plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
 plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
 

@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from productiecapaciteit import results_dir
+from productiecapaciteit import plot_styles_dir, results_dir
 from productiecapaciteit.src.capaciteit_strang import strangWeerstand
 from productiecapaciteit.src.strang_analyse_fun2 import get_config
 from productiecapaciteit.src.weerstand_pandasaccessors import (
@@ -10,6 +10,9 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
     WvpResistanceAccessor,  # noqa: F401
 )
 
+plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
+plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
+
 config = get_config()
 config = config.loc[:, config.columns.notna()]
 
@@ -17,7 +20,7 @@ filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoe
 leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"
 wvpweerstand_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficienten.xlsx"
 
-index = pd.date_range("2012-05-01", "2025-12-31")
+index = pd.date_range("2012-05-01", "2026-12-31")
 
 w_all = {}
 w_offset: dict[int, dict] = {k: {} for k in [-3, -2, -1, 0, 1, 2, 3]}
@@ -42,8 +45,6 @@ plt.savefig(fig_path, dpi=300)
 """
 Effect opwarming
 """
-plt.style.use(["unhcrpyplotstyle", "line"])
-
 lims_sum_dict = {}
 lims_offset = {}
 for temp_opwarming, wi in w_offset.items():
@@ -70,8 +71,6 @@ fig.savefig(fig_path, dpi=300)
 """
 Effect opwarming zoom
 """
-plt.style.use(["unhcrpyplotstyle", "line"])
-
 lims_sum_dict = {}
 lims_offset = {}
 for temp_opwarming, wi in w_offset.items():
@@ -105,7 +104,6 @@ Effect opwarming zoom except pompcapaciteit
     "Verblijftijd": self.lim_verblijf(index),
 }
 """
-plt.style.use(["unhcrpyplotstyle", "line"])
 use_lims = ["Vacuumsysteem", "Luchthappen", "Verblijftijd"]
 
 lims_sum_dict = {}

@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from productiecapaciteit import data_dir, results_dir
+from productiecapaciteit import data_dir, plot_styles_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
@@ -33,8 +33,47 @@ logging.basicConfig(
     handlers=[logger_handler, stdout],
 )
 
+plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
+plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
 
 def get_wvp_slope_per_year2(index, flow, dp, offset_datum, temp_wvp):
+    """
+    Compute the aquifer resistance (WVP) and adjust for temperature effects using a two-step least squares optimization process.
+
+    Parameters
+    ----------
+    index : array-like
+        Array representing time or index values for the observations.
+    flow : array-like
+        Array of flow measurements corresponding to the observations.
+    dp : array-like
+        Array representing differential pressures for the observations.
+    offset_datum : object
+        Reference datum used for offset calculations (e.g., a baseline date or measurement).
+    temp_wvp : array-like
+        Array of temperature values related to water vapor pressure used in the modeling process.
+
+    Returns
+    -------
+    pandas.Series or None
+        A pandas Series containing the optimized parameters and model metadata with the following keys:
+            - "temp_mean": Mean temperature computed from temp_wvp.
+            - "method": Indicates the method used ("Niet" for the initial fit and "sin" for the temperature-adjusted fit).
+
+    Notes
+    -----
+    The function works in two distinct optimization steps:
+        1. It performs an initial optimization on the pressure model using the current temperature values.
+        2. It refines the model by incorporating temperature effects.
+    The optimization is executed using a least squares method with a custom 'arctan' loss function. If the optimization
+    results in parameters at the active bounds, a message is printed and a fallback optimization is attempted. If the
+    fallback optimization fails to produce parameters within the specified bounds, the function returns None.
+
+    Exceptions
+    ----------
+    AssertionError
+        Raised if the fallback optimization produces parameters outside the specified bounds.
+    """
     mask = np.logical_and(np.isfinite(dp), np.isfinite(temp_wvp))
     temp_wvp = temp_wvp[mask]
     index = index[mask]
@@ -152,14 +191,10 @@ leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_model
 df_a_fp = res_folder / "Wvpweerstand_modelcoefficienten.xlsx"
 
 for strang, c in config.iterrows():
-    # if strang != "IK95":
-    #     continue
-
-    print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
     stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
-    logging.info(f"Strang: {strang}")
+    logging.info("Strang: %s", strang)
 
     df_fp = data_dir / "Merged" / f"{strang}.feather"
     df = pd.read_feather(df_fp).set_index("Datum")
@@ -193,7 +228,6 @@ for strang, c in config.iterrows():
     df_a = get_wvp_slope_per_year2(df.index, df.Q, df.dP_wvp2, df.index[0], df.T_bodem)
 
     # measured dp
-    plt.style.use(["unhcrpyplotstyle", "line"])
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 9), sharex=True, sharey=True, gridspec_kw=gridspec_kw)
     ax0.plot(
         df.index,
@@ -205,7 +239,7 @@ for strang, c in config.iterrows():
     ax0.plot(df.index, -df.dP_wvp2, c="C0", label="Gemeten")
     # ax0.legend(fontsize="small")
     ax0.legend(loc=(0, 1), ncol=2)
-    ax0.set_ylabel(f"Drukverlies wvp bij gemeten Q (m)")
+    ax0.set_ylabel("Drukverlies wvp bij gemeten Q (m)")
     ax0.xaxis.set_major_locator(mdates.YearLocator())
     ax0.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax0.xaxis.get_major_locator()))
     Q_avg = df.Q.median()
@@ -228,9 +262,10 @@ for strang, c in config.iterrows():
     ax1.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator()))
 
     fig.tight_layout()
-    fig_path = os.path.join(res_folder, f"Wvpweerstandcoefficient - {strang}.png")
+    fig_path = res_folder / f"Wvpweerstandcoefficient - {strang}.png"
     fig.savefig(fig_path, dpi=300)
-    logging.info(f"Saved result to {fig_path}")
+    plt.close(fig)
+    logging.info("Saved result to %s", fig_path)
 
     df_a["gewijzigd"] = pd.Timestamp.now()
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:

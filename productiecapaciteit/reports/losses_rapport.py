@@ -1,5 +1,4 @@
 import logging
-import os
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -40,9 +39,6 @@ index = pd.date_range("2012-05-01", "2026-12-31")
 date_goal = pd.Timestamp("2025-12-01")
 
 for strang, c in config.iterrows():
-    # if strang != "IK95":
-    #     continue
-
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
     df_a_leiding = pd.read_excel(leidingweerstand_fp, sheet_name=strang)
     df_a_wvp = pd.read_excel(wvpweerstand_fp, sheet_name=strang, index_col=0).squeeze("columns")
@@ -61,6 +57,7 @@ for strang, c in config.iterrows():
 
     fig_path = results_dir / "Synthese" / f"Capaciteit - {strang}.png"
     fig.savefig(fig_path, dpi=300)
-    logging.info(f"Saved capaciteit result to {fig_path}")
+    plt.close(fig)
+    logging.info("Saved capaciteit result to %s", fig_path)
 
 print("hoi")

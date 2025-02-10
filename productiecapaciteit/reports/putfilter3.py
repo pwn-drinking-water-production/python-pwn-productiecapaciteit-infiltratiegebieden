@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
-from productiecapaciteit import data_dir, results_dir
+from productiecapaciteit import data_dir, plot_styles_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import get_config, get_false_measurements, smooth, werkzaamheden_dates
 from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor  # noqa: F401
 
@@ -154,7 +154,8 @@ for strang, c in config.iterrows():
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
         df_a.to_excel(writer, sheet_name=strang)
 
-    plt.style.use(["unhcrpyplotstyle", "line"])
+    plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
+    plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
     fig, ax2 = plt.subplots(1, 1, figsize=(12, 5), gridspec_kw=gridspec_kw)
     ax = ax2.twinx()
     fig.suptitle(strang)
@@ -177,6 +178,7 @@ for strang, c in config.iterrows():
 
     fig_path = os.path.join(res_folder, f"Putweerstandcoefficient - {strang}.png")
     fig.savefig(fig_path, dpi=300)
+    plt.close(fig)
     logging.info(f"Saved result to {fig_path}")
 
 print("hoi")
