@@ -6,7 +6,6 @@ __version__ = "0.0.1"
 
 def show_versions() -> None:
     """Method to print the version of dependencies."""
-
     msg = (
         f"Python version: {python_version()}\n"
         f"NumPy version: {metadata.version('numpy')}\n"

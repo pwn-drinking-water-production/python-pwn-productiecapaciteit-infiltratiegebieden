@@ -60,7 +60,7 @@ dlims_sum_frac = dlims_sum / lims_sum[[0]].values * 100
 
 fig, ax = plt.subplots(figsize=(8.5, 5.75))
 ax.set_title("Effect van opwarming watervoerendpakket op productiecap.\n2012-2022", pad=40)
-dlims_sum_frac.rename(columns={k: f"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
+dlims_sum_frac.rename(columns={k: rf"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
 ax.legend(loc=(0, 1), ncol=7)
 ax.set_ylabel("Toename in productiecap. (%)")
 fig.tight_layout()
@@ -86,7 +86,7 @@ dlims_sum_frac = dlims_sum / lims_sum[[0]].values * 100
 
 fig, ax = plt.subplots(figsize=(8.5, 5.75))
 ax.set_title("Effect van opwarming watervoerendpakket op productiecap.\n2021", pad=40)
-dlims_sum_frac.rename(columns={k: f"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
+dlims_sum_frac.rename(columns={k: rf"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
 ax.legend(loc=(0, 1), ncol=7)
 ax.set_ylabel("Toename in productiecap. (%)")
 ax.set_xlim(("2021-01-01", "2022-01-01"))
@@ -121,7 +121,7 @@ dlims_sum_frac = dlims_sum / lims_sum[[0]].values * 100
 
 fig, ax = plt.subplots(figsize=(8.5, 5.75))
 ax.set_title("Effect van opwarming watervoerendpakket op productiecap.\n2021", pad=40)
-dlims_sum_frac.rename(columns={k: f"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
+dlims_sum_frac.rename(columns={k: rf"{k}$^\circ$C" for k in dlims_sum_frac}).plot(ax=ax)
 ax.legend(loc=(0, 1), ncol=7)
 ax.set_ylabel("Toename in productiecap. (%)")
 ax.set_xlim(("2021-01-01", "2022-01-01"))

@@ -15,8 +15,7 @@ def get_temp(index, mean, delta, time_offset, return_series=False):
     temp_data = delta * np.sin((dt_year / pd.Timedelta("1D") - time_offset) * 2 * np.pi / nday_year) + mean
     if return_series:
         return pd.Series(data=temp_data, index=index_datetime, name="wvp_model_temp")
-    else:
-        return temp_data.values
+    return temp_data.values
 
 
 def visc_ratio(temp, temp_ref=10.0):
@@ -32,6 +31,7 @@ def dis(dis1, dis2):
 def objective(args, return_result=False, **pextra):
     """
     multialpha =
+
     Parameters
     ----------
     args
@@ -118,11 +118,9 @@ def objective(args, return_result=False, **pextra):
     if return_result:
         return drawdown_model
 
-    else:
-        return np.square(
-            drawdown_model[~np.isnan(pextra["drawdown_obs"])]
-            - pextra["drawdown_obs"][~np.isnan(pextra["drawdown_obs"])]
-        )
+    return np.square(
+        drawdown_model[~np.isnan(pextra["drawdown_obs"])] - pextra["drawdown_obs"][~np.isnan(pextra["drawdown_obs"])]
+    )
 
 
 def background(f):

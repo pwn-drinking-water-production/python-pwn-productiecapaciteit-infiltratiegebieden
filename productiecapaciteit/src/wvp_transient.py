@@ -9,7 +9,6 @@ from scipy.optimize import least_squares
 from scipy.stats import hmean
 from wvp_transient_funs import dis, objective
 
-from productiecapaciteit.src.capaciteit_strang import strangWeerstand
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
@@ -109,7 +108,7 @@ def get_perr(res):
     perr_rel = perr / res.x
 
     sl = []
-    for xi, perr_ri in zip(res.x, perr_rel):
+    for xi, perr_ri in zip(res.x, perr_rel, strict=False):
         sl.append(f"{xi} +/- {perr_ri * 100:.1f}%")
 
     print("\n".join(sl))

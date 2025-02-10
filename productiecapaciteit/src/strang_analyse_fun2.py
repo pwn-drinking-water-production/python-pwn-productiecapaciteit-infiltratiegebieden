@@ -28,7 +28,7 @@ def remove_per_from_werkzh_per(werkzh_per, idrop):
 
     out = []
 
-    for start, end in zip(dates[:-1], dates[1:]):
+    for start, end in zip(dates[:-1], dates[1:], strict=False):
         out.append((start, end))
 
     return out
@@ -184,7 +184,7 @@ def plot_false_measurements(ax, ds, c, extend_hours=None, exclude_rules=[], incl
         y2=y1 + 2,
         where=shows,
         alpha=0.8,
-        label="Totaal: {:.2f}%".format(sum(shows) / len(ds) * 100),
+        label=f"Totaal: {sum(shows) / len(ds) * 100:.2f}%",
     )
 
     ax.set_ylabel("Foutieve metingen")
@@ -416,24 +416,21 @@ def deconvolve_wvp(series, shift, sigma):
         series = pd.Series(data=series.values[::-1], index=series.index)
         return series
 
-    else:
-        return series.rolling(2 * int_shift, win_type="gaussian", center=center).mean(std=int_sigma)
+    return series.rolling(2 * int_shift, win_type="gaussian", center=center).mean(std=int_sigma)
 
 
 def temp_correct_discharge(discharge, temp_inf, residence_time, residence_sigma, temp_ref=12.0):
     if residence_time == "Niet":
         return pd.Series(data=discharge, index=temp_inf.index)
-    else:
-        aquifer_temp = deconvolve_wvp(temp_inf, residence_time, residence_sigma)
-        return discharge * visc_ratio(aquifer_temp, temp_ref=temp_ref)
+    aquifer_temp = deconvolve_wvp(temp_inf, residence_time, residence_sigma)
+    return discharge * visc_ratio(aquifer_temp, temp_ref=temp_ref)
 
 
 def temp_correct_drawdown_or_cwvp(drawdown, temp_inf, residence_time, residence_sigma, temp_ref=12.0):
     if residence_time == "Niet":
         return pd.Series(data=drawdown, index=temp_inf.index)
-    else:
-        aquifer_temp = deconvolve_wvp(temp_inf, residence_time, residence_sigma)
-        return drawdown / visc_ratio(aquifer_temp, temp_ref=temp_ref)
+    aquifer_temp = deconvolve_wvp(temp_inf, residence_time, residence_sigma)
+    return drawdown / visc_ratio(aquifer_temp, temp_ref=temp_ref)
 
 
 def model_a_leiding(df, periods, slope, offsets, Q=None):
@@ -443,7 +440,7 @@ def model_a_leiding(df, periods, slope, offsets, Q=None):
     # Adjust final end time assume no schoonmaak happened
     periods[-1] = (periods[-1][0], df.index[-1])
 
-    for offset, (start, end) in zip(offsets, periods):
+    for offset, (start, end) in zip(offsets, periods, strict=False):
         d_offset[start:end] = offset
         d_days_start_wzh[start:end] = -(d_days_start_wzh[start:end].index - start) / pd.Timedelta(days=1)
 
@@ -452,8 +449,7 @@ def model_a_leiding(df, periods, slope, offsets, Q=None):
 
     if Q is None:
         return -(d_offset + slope * d_days_start_wzh) * df.Q**2
-    else:
-        return -(d_offset + slope * d_days_start_wzh) * Q**2
+    return -(d_offset + slope * d_days_start_wzh) * Q**2
 
 
 def model_a_put(df, periods, slope, offsets):
@@ -463,7 +459,7 @@ def model_a_put(df, periods, slope, offsets):
     # Adjust final end time assume no schoonmaak happened
     periods[-1] = (periods[-1][0], df.index[-1])
 
-    for offset, (start, end) in zip(offsets, periods):
+    for offset, (start, end) in zip(offsets, periods, strict=False):
         d_offset[start:end] = offset
         d_days_start_wzh[start:end] = -(d_days_start_wzh[start:end].index - start) / pd.Timedelta(days=1)
 

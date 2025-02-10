@@ -1,13 +1,8 @@
-import logging
 import os
-import matplotlib.pyplot as plt
-import pandas as pd
-from productiecapaciteit.src.capaciteit_strang import strangWeerstand
-from productiecapaciteit.src.capaciteit_strang import get_config
 
-from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors import WellResistanceAccessor
-from productiecapaciteit.src.weerstand_pandasaccessors import WvpResistanceAccessor
+import pandas as pd
+
+from productiecapaciteit.src.capaciteit_strang import get_config, strangWeerstand
 
 data_fd = os.path.join("..", "data")
 config_fn = "strang_props6.xlsx"

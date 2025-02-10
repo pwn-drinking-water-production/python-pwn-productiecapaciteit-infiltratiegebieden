@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime
 from pprint import pformat
 
 import matplotlib.dates as mdates
@@ -8,11 +8,6 @@ import numpy as np
 import pandas as pd
 
 from productiecapaciteit.src.strang_analyse_fun2 import visc_ratio
-from productiecapaciteit.src.weerstand_pandasaccessors import (
-    LeidingResistanceAccessor,
-    WellResistanceAccessor,
-    WvpResistanceAccessor,
-)
 
 gridspec_kw = {
     "left": 0.07,
@@ -30,7 +25,7 @@ gridspec_kw = {
 #     return config
 
 
-class strangWeerstand(object):
+class strangWeerstand:
     def __init__(
         self,
         df_a_leiding,
@@ -116,7 +111,6 @@ class strangWeerstand(object):
         slope = self.lei.slope.iloc[-1]
         offset = self.lei.leiding.a_na_projectie(date, method=method)
         self.lei.loc[len(self.lei)] = dict(datum=date, slope=slope, offset=offset, gewijzigd=pd.Timestamp.now())
-        pass
 
     def add_wel_schoonmaak(self, date, method="mean"):
         date = pd.to_datetime(date)
@@ -124,7 +118,6 @@ class strangWeerstand(object):
         offset = self.fil.wel.a_na_projectie(date, method=method)
 
         self.fil.loc[len(self.fil)] = dict(datum=date, slope=slope, offset=offset, gewijzigd=pd.Timestamp.now())
-        pass
 
     def lim_vac(self, index):
         a_leiding = self.lei.leiding.a_model(index)
@@ -234,7 +227,7 @@ class strangWeerstand(object):
         index_voor = index[index < date_clean]
         index_na = index[index >= date_clean]
 
-        #### Capacity
+        # Capacity
         # Before cleaning
         # show = index < date_clean
         lims_voor = self.lims(index_voor)
@@ -255,7 +248,7 @@ class strangWeerstand(object):
         cap = self.capaciteit_schoonmaak(date_clean, index_na, leiding=True, wel=True)
         ax.plot(index_na, cap, lw=2, label="Max. inzet na schoonmaak", c=f"C{nlims + 1}", ls=":")
 
-        #### Minimal flow
+        # Minimal flow
         # Before cleaning
         flow_min_voor = self.lim_flow_min(index_voor, deltah_veilig=deltah_veilig)
         flow_min_na = self.lim_flow_min(index_na, deltah_veilig=deltah_veilig)
@@ -298,7 +291,6 @@ class strangWeerstand(object):
         ylim = ax.get_ylim()
         ax2.set_ylim((ylim[0] / self.nput, ylim[1] / self.nput))
         ax2.set_ylabel("Capaciteit put (m$^3$/h)")
-        pass
 
     def plot_capaciteit_effect_schoonmaak(
         self,

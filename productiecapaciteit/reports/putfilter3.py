@@ -76,14 +76,13 @@ def get_put_slope_per_year2(df_dPdQ_, datum, slope_val=None):
 
 
 def analyse_a_put2(df_dPdQ, werkzh_datums, Q_avg, t_projectie="2023-10-31 00:00:00", slope=None):
-    """returns df_a"""
+    """Returns df_a"""
     werkzh_datums = list(werkzh_datums)
 
     _, df_a = get_put_slope_per_year2(df_dPdQ, werkzh_datums, slope_val=slope)
 
     if np.all(df_a.wel.a_effect[1:] <= 1):
         logging.info(f"Effectieve schoonmaken: {werkzh_datums[1:]}")
-        pass
 
     else:
         idrop = np.argmax(df_a.wel.a_effect[1:]) + 1
@@ -92,7 +91,7 @@ def analyse_a_put2(df_dPdQ, werkzh_datums, Q_avg, t_projectie="2023-10-31 00:00:
 
         df_a = analyse_a_put2(df_dPdQ, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 
-    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.wel.dp_voor(Q_avg), df_a.wel.dp_na(Q_avg)):
+    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.wel.dp_voor(Q_avg), df_a.wel.dp_na(Q_avg), strict=False):
         logging.info(f"Schoonmaak van {datum}: Drukval bij mediaan debiet gaat van {dp_voor:.2f}m naar {dp_na:.2f}m")
 
     dp_voor = df_a.wel.dp_projectie_voor(t_projectie, Q_avg)

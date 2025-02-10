@@ -13,6 +13,7 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
     model_a_leiding,
     remove_per_from_werkzh_per,
 )
+
 res_path = os.path.abspath(os.path.join(__file__, "..", "..", "results", "PT10offset"))
 logger_handler = logging.FileHandler(
     os.path.join(res_path, "Leidingweerstandcoefficient.log"), mode="w"
@@ -150,19 +151,18 @@ def analyse_a_leiding_voordeel_schoonmaak(
 
         return np.array(m_a_red_frac_result), (np.mean(offsets), np.mean(offsets))
 
-    else:
-        tend = m_a[~m_a.isna()].index[-1]
-        end = m_a[~m_a.isna()][-1]
-        projected_voor = end + slope * (pd.Timestamp(t_projectie) - tend) / pd.Timedelta(days=1)
-        projected_na = projected_voor * (100 + mean_result) / 100
+    tend = m_a[~m_a.isna()].index[-1]
+    end = m_a[~m_a.isna()][-1]
+    projected_voor = end + slope * (pd.Timestamp(t_projectie) - tend) / pd.Timedelta(days=1)
+    projected_na = projected_voor * (100 + mean_result) / 100
 
-        projected_dP_voor = projected_voor * Q_avg**2
-        projected_dP_na = projected_na * Q_avg**2
+    projected_dP_voor = projected_voor * Q_avg**2
+    projected_dP_na = projected_na * Q_avg**2
 
-        logging.info(
-            f"Bij schoonmaak in {t_projectie} gaat verval bij gem debiet gaat van {projected_dP_voor:.2f}m naar {projected_dP_na:.2f}m"
-        )
-        return np.array(m_a_red_frac_result), (projected_voor, projected_na)
+    logging.info(
+        f"Bij schoonmaak in {t_projectie} gaat verval bij gem debiet gaat van {projected_dP_voor:.2f}m naar {projected_dP_na:.2f}m"
+    )
+    return np.array(m_a_red_frac_result), (projected_voor, projected_na)
 
 
 def analyse_a_leiding(df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 00:00:00", slope=None):
@@ -214,7 +214,7 @@ def remove_per_from_werkzh_per(werkzh_per, idrop):
 
     out = []
 
-    for start, end in zip(dates[:-1], dates[1:]):
+    for start, end in zip(dates[:-1], dates[1:], strict=False):
         out.append((start, end))
 
     return out

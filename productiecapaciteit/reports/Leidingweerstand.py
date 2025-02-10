@@ -10,7 +10,6 @@ TODO: pt10offset laat zien dat soms de de sensoren opnieuw ingehangen zijn. => O
 
 import logging
 import os
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -39,6 +38,7 @@ logging.basicConfig(
 
 plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
 plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
+
 
 def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
     mask = np.logical_and(np.isfinite(df_dP_), np.isfinite(df_Q_))
@@ -104,8 +104,7 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
         if fit_pt10:
             logging.info(f"Additional offset pt10: {res.x[-1]:.2f}m")
             return res, get_df_a(res.x[:-1], slope_val=slope_val)
-        else:
-            return res, get_df_a(res.x, slope_val=slope_val)
+        return res, get_df_a(res.x, slope_val=slope_val)
 
     except:
         res = least_squares(cost2, x0=x0, bounds=bounds, loss="arctan", f_scale=0.5)
@@ -123,14 +122,13 @@ def analyse_a_leiding(
     slope=None,
     fit_pt10=False,
 ):
-    """returns df_a"""
+    """Returns df_a"""
     werkzh_datums = list(werkzh_datums)
 
     _, df_a = get_leiding_slope(df_dP, df_Q, werkzh_datums, slope_val=slope, fit_pt10=fit_pt10)
 
     if np.all(df_a.leiding.a_effect[1:] <= 1):
         logging.info(f"Effectieve schoonmaken: {werkzh_datums[1:]}")
-        pass
 
     else:
         idrop = np.argmax(df_a.leiding.a_effect[1:]) + 1
@@ -139,7 +137,7 @@ def analyse_a_leiding(
 
         df_a = analyse_a_leiding(df_dP, df_Q, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 
-    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.leiding.dp_voor(Q_avg), df_a.leiding.dp_na(Q_avg)):
+    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.leiding.dp_voor(Q_avg), df_a.leiding.dp_na(Q_avg), strict=False):
         logging.info(f"Schoonmaak van {datum}: Drukval bij mediaan debiet gaat van {dp_voor:.2f}m naar {dp_na:.2f}m")
 
     dp_voor = df_a.leiding.dp_projectie_voor(t_projectie, Q_avg)
@@ -223,7 +221,17 @@ for strang, c in config.iterrows():
     fig.suptitle(strang)
 
     # Leidingweerstand coeff
-    ax.fill_between(df.index, 0, 1, where=isspui, color='green', alpha=0.4, transform=ax.get_xaxis_transform(), label="Spuien", linewidth=1.5)
+    ax.fill_between(
+        df.index,
+        0,
+        1,
+        where=isspui,
+        color="green",
+        alpha=0.4,
+        transform=ax.get_xaxis_transform(),
+        label="Spuien",
+        linewidth=1.5,
+    )
 
     ax.axhline(0, c="black", lw="0.8")
     df_a.leiding.plot_werkzh(ax, werkzh_datums)
@@ -234,7 +242,6 @@ for strang, c in config.iterrows():
     ax.set_xlim(df.index[[0, -1]])
     # ax.legend(fontsize="small")
     ax.legend(loc=(0.05, 1), ncol=4)
-
 
     # Gemeten en gemodelleerde verlaging bij gemeten debiet
     ax2.axhline(0, c="black", lw="0.8")
@@ -247,7 +254,7 @@ for strang, c in config.iterrows():
     )
     ax2.set_ylim(-4, 1)
     ax2.set_xlim(df.index[[0, -1]])
-    ax2.set_ylabel(f"Verlaging bij gemeten Q (m)")
+    ax2.set_ylabel("Verlaging bij gemeten Q (m)")
     # ax2.legend(fontsize="small")
     ax2.legend(loc=(0, 1), ncol=4)
 

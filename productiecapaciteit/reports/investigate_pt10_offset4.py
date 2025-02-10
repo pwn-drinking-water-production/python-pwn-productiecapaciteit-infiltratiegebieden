@@ -1,6 +1,5 @@
 import logging
 import os
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,9 +17,7 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
 from productiecapaciteit.src.weerstand_pandasaccessors import LeidingResistanceAccessor  # noqa: F401
 
 res_folder = results_dir / "Leidingweerstand"
-logger_handler = logging.FileHandler(
-    results_dir / "Leidingweerstand" / "Leidingweerstandcoefficient.log", mode="w"
-)
+logger_handler = logging.FileHandler(results_dir / "Leidingweerstand" / "Leidingweerstandcoefficient.log", mode="w")
 stdout = logging.StreamHandler()
 logging.basicConfig(
     level=logging.INFO,
@@ -31,14 +28,14 @@ logging.basicConfig(
 plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
 plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
 
+
 def get_covariance_least_squares(res):
     # return np.sum(res.fun**2) / (len(res.fun) - len(res.x))
     _, s, VT = svd(res.jac, full_matrices=False)
     threshold = np.finfo(float).eps * max(res.jac.shape) * s[0]
     s = s[s > threshold]
-    VT = VT[:s.size]
+    VT = VT[: s.size]
     return np.dot(VT.T / s**2, VT)
-
 
 
 def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
@@ -106,10 +103,11 @@ def get_leiding_slope(df_dP_, df_Q_, datum, slope_val=None, fit_pt10=False):
         if fit_pt10:
             cov = get_covariance_least_squares(res)
             offset_std = np.sqrt(cov[-1, -1])
-            logging.warning(f"Additional offset pt10 included in result: {res.x[-1]:.2f}m +/- {offset_std:.2f}m. Median offset at Q<1m3/h: {offset_est:.2f}m +/- {offset_est_std:.2f}m")
+            logging.warning(
+                f"Additional offset pt10 included in result: {res.x[-1]:.2f}m +/- {offset_std:.2f}m. Median offset at Q<1m3/h: {offset_est:.2f}m +/- {offset_est_std:.2f}m"
+            )
             return res, get_df_a(res.x[:-1], slope_val=slope_val)
-        else:
-            return res, get_df_a(res.x, slope_val=slope_val)
+        return res, get_df_a(res.x, slope_val=slope_val)
 
     except:
         res = least_squares(cost2, x0=x0, bounds=bounds, loss="arctan", f_scale=0.5)
@@ -127,14 +125,13 @@ def analyse_a_leiding(
     slope=None,
     fit_pt10=False,
 ):
-    """returns df_a"""
+    """Returns df_a"""
     werkzh_datums = list(werkzh_datums)
 
     _, df_a = get_leiding_slope(df_dP, df_Q, werkzh_datums, slope_val=slope, fit_pt10=fit_pt10)
 
     if np.all(df_a.leiding.a_effect[1:] <= 1):
         logging.info(f"Effectieve schoonmaken: {werkzh_datums[1:]}")
-        pass
 
     else:
         idrop = np.argmax(df_a.leiding.a_effect[1:]) + 1
@@ -143,7 +140,7 @@ def analyse_a_leiding(
 
         df_a = analyse_a_leiding(df_dP, df_Q, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 
-    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.leiding.dp_voor(Q_avg), df_a.leiding.dp_na(Q_avg)):
+    for datum, dp_voor, dp_na in zip(df_a.datum, df_a.leiding.dp_voor(Q_avg), df_a.leiding.dp_na(Q_avg), strict=False):
         logging.info(f"Schoonmaak van {datum}: Drukval bij mediaan debiet gaat van {dp_voor:.2f}m naar {dp_na:.2f}m")
 
     dp_voor = df_a.leiding.dp_projectie_voor(t_projectie, Q_avg)
@@ -152,6 +149,7 @@ def analyse_a_leiding(
         f"Bij schoonmaak in {t_projectie} gaat drukval bij Q={Q_avg:.1f}m3/h gaat van {dp_voor:.2f}m naar {dp_na:.2f}m"
     )
     return df_a
+
 
 temp_ref = 12.0
 t_projectie = "2025-10-31 00:00:00"

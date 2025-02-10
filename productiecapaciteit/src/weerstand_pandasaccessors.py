@@ -5,7 +5,8 @@ import pandas as pd
 @pd.api.extensions.register_dataframe_accessor("wel")
 class WellResistanceAccessor:
     """De eerste datum is het begin van je tijdreeks.
-    Andere datums zijn die van de werkzaamheden"""
+    Andere datums zijn die van de werkzaamheden
+    """
 
     def __init__(self, pandas_obj):
         self._validate(pandas_obj)
@@ -25,7 +26,6 @@ class WellResistanceAccessor:
 
         # all offsets are negative
         assert np.all(obj.offset <= 0)
-        pass
 
     @property
     def datum(self):
@@ -78,13 +78,14 @@ class WellResistanceAccessor:
 
         datums = self.datum.copy()
 
-        if index[0] < datums[0]:
-            datums[0] = index[0]
+        datums[0] = min(index[0], datums[0])
 
         if index[-1] > datums[-1]:
             datums = np.concatenate((datums, index[[-1]]))
 
-        for offset, slope, datum, start, end in zip(self.offset, self.slope, self.datum, datums[:-1], datums[1:]):
+        for offset, slope, datum, start, end in zip(
+            self.offset, self.slope, self.datum, datums[:-1], datums[1:], strict=False
+        ):
             d_offset[start:end] = offset
             d_slope[start:end] = slope
             d_days_since_wzh[start:end] = (d_days_since_wzh[start:end].index - datum) / pd.Timedelta(days=1)
@@ -170,12 +171,11 @@ class WellResistanceAccessor:
             label="Werkzh meegenomen in model",
         )
         self.plot_effect(ax)
-        pass
 
     def plot_effect(self, ax, yc=0.02):
         transform = ax.get_xaxis_transform()
 
-        for date, effect in zip(self.datum[1:], self.a_effect[1:]):
+        for date, effect in zip(self.datum[1:], self.a_effect[1:], strict=False):
             string = f"{(1 - effect) * 100:.0f}% reductie"
             ax.text(
                 date,
@@ -193,7 +193,8 @@ class WellResistanceAccessor:
 @pd.api.extensions.register_series_accessor("wvp")
 class WvpResistanceAccessor:
     """De eerste datum is het begin van je tijdreeks.
-    Andere datums zijn die van de werkzaamheden"""
+    Andere datums zijn die van de werkzaamheden
+    """
 
     def __init__(self, pandas_obj):
         self._validate(pandas_obj)
@@ -222,7 +223,6 @@ class WvpResistanceAccessor:
         assert obj.method in ("sin", "Niet"), "Method not supported"
         assert obj.temp_delta >= 0.0
         assert (obj.temp_mean >= 0.0) and (obj.temp_mean <= 30.0)
-        pass
 
     @property
     def offset(self):
@@ -281,19 +281,15 @@ class WvpResistanceAccessor:
             temp_df = pd.Series(data=temp_data, index=index, name="wvp_model_temp")
             return temp_df
 
-        else:
-            AssertionError("Method not supported")
-
-        pass
+        AssertionError("Method not supported")
 
     def model_viscratio(self, index):
         """Bij 20degC -> 0.8, bij 5degC -> 1.2"""
         if self.method == "Niet":
             return pd.Series(data=1, index=index, name="wvp_model_viscratio")
 
-        else:
-            temp_aquifer = self.temp_model(index)
-            return self.visc_ratio(temp_aquifer, temp_ref=self.temp_ref).rename("wvp_model_viscratio")
+        temp_aquifer = self.temp_model(index)
+        return self.visc_ratio(temp_aquifer, temp_ref=self.temp_ref).rename("wvp_model_viscratio")
 
     def viscratio(self, index, temp_wvp):
         """Bij 20degC -> 0.8, bij 5degC -> 1.2"""
@@ -335,7 +331,8 @@ class WvpResistanceAccessor:
 @pd.api.extensions.register_dataframe_accessor("leiding")
 class LeidingResistanceAccessor:
     """De eerste datum is het begin van je tijdreeks.
-    Andere datums zijn die van de werkzaamheden"""
+    Andere datums zijn die van de werkzaamheden
+    """
 
     def __init__(self, pandas_obj):
         self._validate(pandas_obj)
@@ -355,7 +352,6 @@ class LeidingResistanceAccessor:
 
         # all offsets are negative
         assert np.all(obj.offset <= 0)
-        pass
 
     @property
     def datum(self):
@@ -407,13 +403,14 @@ class LeidingResistanceAccessor:
 
         datums = self.datum.copy()
 
-        if index[0] < datums[0]:
-            datums[0] = index[0]
+        datums[0] = min(index[0], datums[0])
 
         if index[-1] > datums[-1]:
             datums = np.concatenate((datums, index[[-1]]))
 
-        for offset, slope, datum, start, end in zip(self.offset, self.slope, self.datum, datums[:-1], datums[1:]):
+        for offset, slope, datum, start, end in zip(
+            self.offset, self.slope, self.datum, datums[:-1], datums[1:], strict=False
+        ):
             d_offset[start:end] = offset
             d_slope[start:end] = slope
             d_days_since_wzh[start:end] = (d_days_since_wzh[start:end].index - datum) / pd.Timedelta(days=1)
@@ -494,12 +491,11 @@ class LeidingResistanceAccessor:
             label="Werkzh meegenomen in model",
         )
         self.plot_effect(ax)
-        pass
 
     def plot_effect(self, ax, yc=0.02):
         transform = ax.get_xaxis_transform()
 
-        for date, effect in zip(self.datum[1:], self.a_effect[1:]):
+        for date, effect in zip(self.datum[1:], self.a_effect[1:], strict=False):
             string = f"{(1 - effect) * 100:.0f}% reductie"
             ax.text(
                 date,

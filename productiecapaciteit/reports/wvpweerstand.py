@@ -3,8 +3,8 @@ Calculate the model coefficients for the WVP resistance model.
 
 TODO: Use mutiple Hantush wells to calculate the model coefficients for the WVP resistance model.
 """
+
 import logging
-import os
 from datetime import timedelta
 
 import matplotlib.dates as mdates
@@ -35,6 +35,7 @@ logging.basicConfig(
 
 plt.style.use(plot_styles_dir / "unhcrpyplotstyle.mplstyle")
 plt.style.use(plot_styles_dir / "types" / "line.mplstyle")
+
 
 def get_wvp_slope_per_year2(index, flow, dp, offset_datum, temp_wvp):
     """
