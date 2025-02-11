@@ -202,19 +202,20 @@ for strang, c in config.iterrows():
 
     include_rules = [
         "Unrealistic flow",
-        # "Tijdens spuien",
+        "Tijdens spuien",
+        "Tijdens proppen",
         "Little flow",
         # "Niet steady",
         # "Niet 3-day steady"
     ]
-    untrusted_measurements = get_false_measurements(df, c, extend_hours=1, include_rules=include_rules)
+    untrusted_measurements = get_false_measurements(df, c, extend_hours=10, include_rules=include_rules)
 
     df.loc[untrusted_measurements, :] = np.nan
 
     # only use steady state (2 days constant)
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
     df_a_leiding = pd.read_excel(leidingweerstand_fp, sheet_name=strang)
-    p_omstorting = df.gws1.where(~df.gws1.isna(), df.gws0 + df_a_filter.wel.dp_model(df.index, df.Q / c.nput))
+    p_omstorting = df.gws1.where(~df.gws1.isna(), df.gws0 - df_a_filter.wel.dp_model(df.index, df.Q / c.nput))
     df["dP_wvp2"] = p_omstorting - df.pandpeil
     percentage = 0.20
 
