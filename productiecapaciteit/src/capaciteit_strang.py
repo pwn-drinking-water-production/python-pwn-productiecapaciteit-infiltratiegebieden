@@ -18,13 +18,6 @@ gridspec_kw = {
     "hspace": 0.2,
 }
 
-
-# def get_config(fn):
-#     config = pd.read_excel(fn).set_index("Unnamed: 0").T
-#     config = config.loc[:, config.columns.notna()]
-#     return config
-
-
 class strangWeerstand:
     def __init__(
         self,

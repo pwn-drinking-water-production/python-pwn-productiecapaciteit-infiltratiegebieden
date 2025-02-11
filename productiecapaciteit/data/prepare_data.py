@@ -48,8 +48,8 @@ pandpeil = read_plenty_excel(pandpeil_fp)
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang or "IK1" in strang:
     #     continue
-    if strang != "IK96":
-        continue
+    # if strang != "P100":
+    #     continue
 
     print(strang)
 

@@ -170,7 +170,7 @@ df_a_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficiente
 for strang, c in config.iterrows():
     # if "P" in strang or "Q" in strang:
     #     continue
-    # if strang != 'IK96':
+    # if strang != 'P100':
     #     continue
 
     # print(strang)
