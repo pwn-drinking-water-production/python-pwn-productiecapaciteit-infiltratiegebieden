@@ -1,5 +1,7 @@
 """
 Gebuik dit script om de filterweerstandcoefficienten te berekenen.
+
+Ongecorrigeerd voor temperatuur. Implementeer viscositeit.
 """
 
 import logging
@@ -120,9 +122,6 @@ df_a_fp = os.path.join(res_folder, "Filterweerstand_modelcoefficienten.xlsx")
 
 
 for strang, c in config.iterrows():
-    # if strang != "IK105":
-    #     continue
-
     print(strang)
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
     stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
