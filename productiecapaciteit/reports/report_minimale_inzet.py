@@ -13,7 +13,7 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
 )
 
 data_fd = os.path.join("..", "data")
-config_fn = "strang_props6.xlsx"
+config_fn = "strang_props7.csv"
 config = get_config(os.path.join(data_fd, config_fn))
 config = config.loc[:, config.columns.notna()]
 

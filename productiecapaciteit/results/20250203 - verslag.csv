@@ -4,3 +4,71 @@ Interpret leindingweerstandcoeff.png for additional dates	20-10-2018	"15-10-2017
 PT10 Alignment (investigate_pt10_offset4.py)	Ok maybe time is not aligned between diver and pt10	Ok	Ok	Ok	Ok	Ok	Ok	Ok	Ok	Ok	Ok	Offset van 18cm stabiel	Ok	Ok	Ok	Ok	Lijkt begin 2024 geher-kalibreerd	subtracted 60cm	Ok	Ok	Ok	Ok	Ok	Niet ok. Drift
 putfilter3.py	Geen verstopping	Geen verstopping. Weird drift in one of the divers	Geen verstopping	Geen verstopping	Geen verstopping	Wel verstopping!	Werk (2017, 50, 52) toegevoegd	Geen verstopping	Wel verstopping!	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping	Geen verstopping
 wvpweerstand.py	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Prachtig	Goed	Goed	Goed	Goed	Goed	Goed	Goed	Goed	Goed	Goed	Goed	Goed
+
+Q200. Seizoensfluctuatie in leidingweerstand. Terwel er geen seizzoensfluctuatie in de filterweerstand zit.
+Q200. Eind 2028 werk toevoegen
+Q300. Rare ruis in drukmetingen leidingweerstand. 
+Q300. Geen duidelijke toename of afname van de leidingweerstand. Schooonmaken helpt niet en wordt ook niet slechter.
+Q400. Geen duidelijke toename of afname van de leidingweerstand. Schooonmaken helpt niet en wordt ook niet slechter.
+Q400. Drift in druksensoren tussen 2017 en 2019
+Q500. Veel metingen weggevallen. Hoe verklaar je de 49% effectiviteit schoonmaak in 2023.
+=> Q500. 0% reductie werkzh lijken wel meegenomen te worden in het model.
+Q500. 
+Q600. Rare metingen in de drukmetingen PT10/diver.
+Q600. Werkzh hebben geen zin.
+P100. Lichte afwijking druksensor PT10 2018
+P100. Werkzh hebben geen invloed
+P200. Dalende trent enkel in 2013-2018, plat na 2018. Rustig.
+P300 compleet vlak. Bijna geen leiddingweerstand.
+P400. rustig, niks geks.
+P500. Rustig en stabiel.
+P600. Rustig en stabiel.
+=> Schoonmaken van de ICAS-leidingen heeft geen zin.
+=> Gigantische afwijkingen in IKIEF pt10. Jaarlijks met de hand kalibreren (handpeilen). Om de vijf jaar vervangen.
+=> IKIEF en ICAS. Bij iedere meter druk verval tgv verstopping leiding -> leidingschoonmaken.  
+IK91. Schoonmaak eens in de vier jaar.
+IK92. Schoonmaak duidelijk effect. Elke twee jaar schoonmaken.
+IK93. Schoonmaak duidelijk effect. Elke twee jaar schoonmaken.
+IK94. Schoonmaak duidelijk effect. Elke twee jaar schoonmaken.
+IK95. Schoonmaak duidelijk effect. Elke vier jaar schoonmaken.
+IK96. Schoonmaak duidelijk effect. Elke zes jaar schoonmaken.
+IK101. Eens in de zes jaar schoonmaken. Leiding wordt nu vervangen.
+IK102. Schoonmaak duidelijk effect. Elke twee jaar schoonmaken.
+IK103. Niet echt een verval tgv verstopping leiding. Even goed uitzoeken. Vergelijkbare strangen wel verval.
+IK104. Schoonmaak duidelijk effect. Elke twee jaar schoonmaken.
+IK105. Schoonmaak duidelijk effect. Elke drie jaar schoonmaken.
+IK106. Schoonmaak duidelijk effect. Elke drie jaar schoonmaken.
+
++++++++++++++++++++++++
+Rijtjes waarin alle putten van een bepaalde strang zijn bemeten opzoeken. Conclusies meenemen in analyse
+Voor ICAS een rijtje van iedere strang in het voorjaar.
+Q100. Eens in de acht jaar schoonmaken.
+Q200. niet schoonmaken. Geen weerstand.
+Q300. Seizoensinvloed. Afgelopen schoonmaken lijken geen invloed te hebben gehad. Lichte trent opbouwen weerstand. Volgend jaar schoonmaken daarna 10 jaar niet.
+Q400. 2026 op de planning voor schoonmaak. Eens in de acht jaar.
+Q500. Geen weerstand.
+Q600. Iedere twee jaar schoonmaken.
+P100. Iedere twee jaar schoonmaken.
+P200. Geen weeerstand
+P300. Iedere twee jaar.
+P400. Geen weerstand
+P500. Geen weerstand
+P600. Geen weerstand
+IKIEF. Geen weerstand.
+ 
++++++++++++++++++++++++
+WVP weerstand naam in figuren
+IK91. Gekke waarden in 2017.
+
+Afgelopen winter: P200, Q200, P500, Q100, Q300, IK94, 
+Nu: IK96
+Straks: IK103.
+Analyse uitvoeren in zomervenster.
+
++++++++++++++++++++++++
+Ik maak een overzicht/tabel met theoretische capaciteit.
+Testen capaciteit. Veld in.
+Minimale inzet.
++++++++++++++++++++++++
+Seizoensmin seizoensmax
+

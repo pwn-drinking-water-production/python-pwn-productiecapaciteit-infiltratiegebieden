@@ -45,7 +45,7 @@ with open(fp, "w", encoding="utf-8") as f:
         cap_schoonmaak = lims_schoonmaak.min()
         lim_cats_schoonmaak = lims_schoonmaak[lims_schoonmaak < cap_schoonmaak * 1.1].index
 
-        if effect_som.item() / cap_min > 0.025:
+        if not cap_min or effect_som.item() / cap_min > 0.025:
             if frac > 0.1 and frac < 0.9:
                 welke = "Leiding en filter"
 
