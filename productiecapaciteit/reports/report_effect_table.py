@@ -15,9 +15,12 @@ filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoe
 leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_modelcoefficienten.xlsx"
 wvpweerstand_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficienten.xlsx"
 
-index = pd.date_range("2012-05-01", "2025-12-31")
-date_clean = pd.Timestamp("2025-04-01")
-date_goal = pd.Timestamp("2025-10-01")
+
+
+
+index = pd.date_range("2012-05-01", "2026-12-31")
+date_clean = pd.Timestamp("2025-10-01")
+date_goal = pd.Timestamp("2025-12-01")
 
 som_dict: dict[str, float] = {}
 report: dict[str, float] = {}

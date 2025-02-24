@@ -37,6 +37,7 @@ wvpweerstand_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficiente
 
 index = pd.date_range("2012-05-01", "2026-12-31")
 date_goal = pd.Timestamp("2025-12-01")
+date_clean = pd.Timestamp("2025-10-01")
 
 for strang, c in config.iterrows():
     df_a_filter = pd.read_excel(filterweerstand_fp, sheet_name=strang)
@@ -44,12 +45,9 @@ for strang, c in config.iterrows():
     df_a_wvp = pd.read_excel(wvpweerstand_fp, sheet_name=strang, index_col=0).squeeze("columns")
 
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
-    date_clean = "2025-10-01"
-
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw=gridspec_kw)
     fig.suptitle(
-        f"{strang}: Capaciteit met geplande schoonmaak putten en leiding op {pd.Timestamp(date_clean).strftime('%d-%m-%Y')}\n"
-        f""
+        f"{strang}: Capaciteit met geplande schoonmaak putten en leiding op {date_clean.strftime('%d-%m-%Y')}"
     )
 
     weerstand.plot_lims(index, date_clean, ax=ax0)

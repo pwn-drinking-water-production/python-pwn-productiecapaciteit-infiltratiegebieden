@@ -254,6 +254,8 @@ def get_config(fn="strang_props7.csv"):
         "Qlim_bio_per_put": float,
         "Qmin_inzetvolgorde20230523": float,
         "Qmax_inzetvolgorde20230523": float,
+        "Qmin_inzetvolgorde20250219": float,
+        "Qmax_inzetvolgorde20250219": float,
         "hverbindingvacuum": float,
         "test2015_per_put": float,
         "PA_tag_prefix": str,
