@@ -273,7 +273,9 @@ def get_config(fn="strang_props7.csv"):
     }
     fp = data_dir / fn
     out = pd.read_csv(fp, index_col=0, sep=";").T
-    return out.astype(dtypes)
+    out = out.astype(dtypes)
+    out["dx_mirrorwell"] = out["dx_mirrorwell"].apply(pd.eval)
+    return out
 
 
 def read_plenty_excel(plenty_path):

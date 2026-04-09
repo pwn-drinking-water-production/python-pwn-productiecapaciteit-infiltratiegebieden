@@ -60,8 +60,8 @@ params = {
     "alpha_multi": [2.7, 0.1, 25.0],
 }
 
-dx_put = int(ci.dx_tussenputten)
-dx_mirrorwell = pd.eval(ci.dx_mirrorwell)  # [li for li in pd.eval(ci.dx_mirrorwell) if li[1] < 200]
+dx_put = ci.dx_tussenputten
+dx_mirrorwell = ci.dx_mirrorwell  # [li for li in pd.eval(ci.dx_mirrorwell) if li[1] < 200]
 nput_model = 15
 
 multiwell = (
