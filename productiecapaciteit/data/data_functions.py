@@ -8,6 +8,7 @@
 
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import dawacotools as dw
 import numpy as np
@@ -51,6 +52,17 @@ werkzaamheden_dict = {
     "IK105": [(2016, 44, 45), (2017, 44, 46), (2021, 13, 13), (2022, 41, 42), (2023, 49, 50)],
     "IK106": [(2017, 5, 6), (2019, 6, 7), (2020, 6, 6), (2024, 2, 3)],
 }
+
+
+def get_strang_props_path() -> Path:
+    """Return the path to the strang properties CSV file.
+
+    Returns
+    -------
+    Path
+        Absolute path to ``strang_props7.csv`` in the package data directory.
+    """
+    return Path(__file__).parent / "strang_props7.csv"
 
 
 def prepare_strang_data(plenty_path, fp_out, config):
