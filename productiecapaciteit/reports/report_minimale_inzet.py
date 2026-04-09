@@ -31,7 +31,6 @@ output_file = results_dir / "Synthese" / "min_max_table.txt"
 # Write header to file
 with open(output_file, mode='w', encoding="utf-8") as f:
     f.write(f"Strang\tQ_min [m3/h] (model;Δh={deltah_veilig:.1f}m)\tQ_min [m3/h] (inzetvolgorde feb 2025)\tQ_max [m3/h] (model)\tQ_max [m3/h] (inzetvolgorde 2023)\tAantal putten\tQ_min [m3/h] (model;Δh=1,5m)\tQ_min [m3/h] (inzetvolgorde 2023)\tQ_max [m3/h] (model)\tQ_max [m3/h] (inzetvolgorde 2023)\n")
-    
     for strang, c in config.iterrows():
         # if strang != "IK105":
         #     continue
