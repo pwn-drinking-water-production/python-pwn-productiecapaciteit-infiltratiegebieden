@@ -65,6 +65,18 @@ def get_strang_props_path() -> Path:
     return Path(__file__).parent / "strang_props7.csv"
 
 
+def get_data_dir() -> Path:
+    """Return the path to the data directory.
+
+    Returns
+    -------
+    Path
+        Absolute path to the data directory, which is assumed to be located at
+        ``../data`` relative to this file.
+    """
+    return Path(__file__).parent.parent.parent / "data"
+
+
 def prepare_strang_data(plenty_path, fp_out, config):
     """
     Combines plenty data with a dawaco measurement for entire secundair.
