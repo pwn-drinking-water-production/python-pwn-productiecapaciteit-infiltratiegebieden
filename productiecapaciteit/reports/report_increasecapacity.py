@@ -14,6 +14,9 @@ Goals:
 # Actions
 0) Validate pressure sensors (PTofsett)
 => semi-done. Check plots with Bas
+=> moving maximum / 99prctl
+=> model: 90th prctl instead of median of 
+=> Bas: transient model to compute PT10offset
 1) Get WVPweerstand (infiltration lake + well clogging) 
     - Validate method of computation
     - Validate relationship with Q
@@ -119,6 +122,14 @@ beta_settings = {
 # %% get config
 config = get_config()
 #config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
+
+# %% new: focus on low-flow data and good stable periods. Define settings per strang to get 'best' datapoints without too few datapoints.
+config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
+
+
+
+
+
 
 
 
@@ -390,43 +401,6 @@ config = get_config()
 # pt10ofset. It deletes the first mintimelowflow and the last
 # low flow value from each period with stable low flow. 
 # what is low flow? => determined by lowflowcutoff
-# -------------------------------------
-# FUNCTION: stable low-flow detection
-# -------------------------------------
-def get_stable_low_flow(df, lowflowcutoff, mintimelowflow):
-
-    low_mask = df["Q"] < lowflowcutoff
-    low_idx = df.index[low_mask]
-
-    if len(low_idx) == 0:
-        return df.iloc[[]]
-
-    groups = []
-    current_block = [low_idx[0]]
-
-    for i in range(1, len(low_idx)):
-        if (low_idx[i] - low_idx[i-1]) <= pd.Timedelta("1.5h"):
-            current_block.append(low_idx[i])
-        else:
-            groups.append(current_block)
-            current_block = [low_idx[i]]
-
-    groups.append(current_block)
-
-    keep_indices = []
-
-    for block in groups:
-
-        # require enough length AFTER trimming
-        if len(block) < (mintimelowflow + 2):
-            continue
-
-        # remove transient start + last point
-        trimmed = block[mintimelowflow:-1]
-
-        keep_indices.extend(trimmed)
-
-    return df.loc[keep_indices]
 
 
 # %% loop
