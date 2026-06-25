@@ -116,6 +116,7 @@ def get_rules(exclude_rules=[], include_rules=[]):
     ]
 
     if include_rules:
+        assert exclude_rules == [], "Cannot use both include_rules and exclude_rules"
         rules = [r for r in rules if r[0] in include_rules]
 
     if exclude_rules:
