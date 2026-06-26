@@ -19,12 +19,14 @@ requires-python = ">= 3.8"
 dependencies = [
     "pandas",
     "pyarrow",
+    "scipy",
     "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git",
     "unhcrpyplotstyle @ git+https://github.com/leichen88/unhcrpyplotstyle.git",
     "pandas-stubs>=2.0.2.230605",
     "openpyxl",
     "ruff==0.15.6",
 ]
+
 keywords = ["hydrology", "groundwater", "modeling", "Modflow 6", "flopy"]
 classifiers = [
     'Development Status :: 4 - Beta',
@@ -36,6 +38,12 @@ classifiers = [
     'Programming Language :: Python :: 3.9',
     'Programming Language :: Python :: 3.10',
     'Topic :: Scientific/Engineering :: Hydrology',
+]
+
+[project.optional-dependencies]
+test = [
+    "pastas",
+    "pytest",
 ]
 
 [project.urls]
