@@ -14,6 +14,9 @@ Goals:
 # Actions
 0) Validate pressure sensors (PTofsett)
 => semi-done. Check plots with Bas
+=> moving maximum / 99prctl
+=> model: 90th prctl instead of median of
+=> Bas: transient model to compute PT10offset
 1) Get WVPweerstand (infiltration lake + well clogging)
     - Validate method of computation
     - Validate relationship with Q
@@ -118,6 +121,9 @@ beta_settings = {
 # %% get config
 config = get_config()
 # config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
+
+# %% new: focus on low-flow data and good stable periods. Define settings per strang to get 'best' datapoints without too few datapoints.
+config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
 
 
 # # %% ESTIMATE BETA PER STRANG (ROBUST VERSION)
