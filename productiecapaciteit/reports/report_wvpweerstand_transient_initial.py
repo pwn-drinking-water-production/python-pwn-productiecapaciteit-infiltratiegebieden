@@ -9,13 +9,10 @@ from productiecapaciteit import results_dir
 from productiecapaciteit.reports.report_wvpweerstand_transient import (
     CONFIG_FN,
     DEFAULT_KD_BOUNDS_M2_PER_D,
-    LEGACY_RESULTS_SUBDIR,
-    LEGACY_TRANSIENT_START_WORKBOOK,
     RESULTS_SUBDIR,
     TRANSIENT_INITIAL_LOG,
     TRANSIENT_START_WORKBOOK,
     default_transient_coefficients,
-    first_existing_path,
     normalize_transient_coefficients,
     read_series_workbook,
     sheet_to_series,
@@ -114,11 +111,7 @@ def main(strangen=None):
     steady_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficienten.xlsx"
     start_fp = output_dir / TRANSIENT_START_WORKBOOK
     steady_sheets = read_series_workbook(steady_fp, required=True)
-    start_source_fp = first_existing_path(
-        start_fp,
-        results_dir / LEGACY_RESULTS_SUBDIR / LEGACY_TRANSIENT_START_WORKBOOK,
-    )
-    start_sheets = read_series_workbook(start_source_fp)
+    start_sheets = read_series_workbook(start_fp)
 
     updated_start_sheets = dict(start_sheets)
 

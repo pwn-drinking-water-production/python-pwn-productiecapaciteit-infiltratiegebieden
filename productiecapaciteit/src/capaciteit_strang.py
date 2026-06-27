@@ -18,6 +18,7 @@ gridspec_kw = {
     "hspace": 0.2,
 }
 
+
 class strangWeerstand:
     def __init__(
         self,

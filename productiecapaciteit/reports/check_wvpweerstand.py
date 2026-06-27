@@ -1,19 +1,15 @@
 # %%
 import os
+from datetime import timedelta
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from datetime import timedelta
 
 from productiecapaciteit import data_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
     get_config,
     get_false_measurements,
-)
-from productiecapaciteit.src.weerstand_pandasaccessors import (
-    WellResistanceAccessor,
-    WvpResistanceAccessor,
-    LeidingResistanceAccessor,
 )
 
 # --------------------------------------------------
@@ -33,7 +29,6 @@ filterweerstand_fp = results_dir / "Filterweerstand" / "Filterweerstand_modelcoe
 # LOOP
 # --------------------------------------------------
 for strang, c in config.iterrows():
-
     print(f"\n=== VALIDATING {strang} ===")
 
     df_fp = data_dir / "Merged" / f"{strang}.feather"
@@ -76,11 +71,7 @@ for strang, c in config.iterrows():
     mask = df.gws1.notna()
 
     ax.scatter(df.gws1[mask], p_omstorting_reconstructed[mask], s=4, alpha=0.5)
-    ax.plot(
-        [df.gws1.min(), df.gws1.max()],
-        [df.gws1.min(), df.gws1.max()],
-        "k--"
-    )
+    ax.plot([df.gws1.min(), df.gws1.max()], [df.gws1.min(), df.gws1.max()], "k--")
 
     ax.set_xlabel("gws1 (measured)")
     ax.set_ylabel("gws1 (reconstructed)")

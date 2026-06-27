@@ -272,5 +272,3 @@ for strang, c in config.iterrows():
     df_a["gewijzigd"] = pd.Timestamp.now()
     with pd.ExcelWriter(df_a_fp, if_sheet_exists="replace", mode="a", engine="openpyxl") as writer:
         df_a.to_excel(writer, sheet_name=strang)
-
-print("hoi")

@@ -89,7 +89,7 @@ def analyse_a_put2(df_dPdQ, werkzh_datums, Q_avg, t_projectie="2023-10-31 00:00:
     else:
         idrop = np.argmax(df_a.wel.a_effect[1:]) + 1
         removed = werkzh_datums.pop(idrop)
-        logging.info(f"=> Dropping: {removed}. Remaining dates: {werkzh_datums}")
+        logging.info("=> Dropping: %s. Remaining dates: %s", removed, werkzh_datums)
 
         df_a = analyse_a_put2(df_dPdQ, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 
@@ -126,7 +126,7 @@ for strang, c in config.iterrows():
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
     stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
-    logging.info(f"Strang: {strang}")
+    logging.info("Strang: %s", strang)
 
     df_fp = data_dir / "Merged" / f"{strang}.feather"
     df = pd.read_feather(df_fp).set_index("Datum")
@@ -177,6 +177,6 @@ for strang, c in config.iterrows():
     fig_path = os.path.join(res_folder, f"Putweerstandcoefficient - {strang}.png")
     fig.savefig(fig_path, dpi=300)
     plt.close(fig)
-    logging.info(f"Saved result to {fig_path}")
+    logging.info("Saved result to %s", fig_path)
 
 print("hoi")

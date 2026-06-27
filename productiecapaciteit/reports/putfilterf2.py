@@ -4,14 +4,11 @@ Gebuik dit script om de filterweerstandcoefficienten te berekenen.
 Ongecorrigeerd voor temperatuur. Implementeer viscositeit.
 """
 
-import logging
 import os
-from sys import stdout
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.optimize import least_squares
 
 from productiecapaciteit import data_dir, plot_styles_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import get_config, get_false_measurements, smooth, werkzaamheden_dates
@@ -48,12 +45,13 @@ for strang, c in config.iterrows():
     df["dPdQ"] = (df.gws0 - df.gws1) / (df.Q / c.nput)
     df["dPdQ_smooth"] = smooth(df["dPdQ"], days=1)
 
-    df["R_f"] = (df.gws0 - df.gws1) / (df.Q / c.nput) # resistance at/near the filter
+    df["R_f"] = (df.gws0 - df.gws1) / (df.Q / c.nput)  # resistance at/near the filter
     df["R_f"] = smooth(df["R_f"], days=1)
-    df["R_bw"] = (df.gws1 - df.gws2) / (df.Q / c.nput) # resistance at borehole wall and nearby aquifer, possibly affected by vertical resistance below the filter
+    df["R_bw"] = (df.gws1 - df.gws2) / (
+        df.Q / c.nput
+    )  # resistance at borehole wall and nearby aquifer, possibly affected by vertical resistance below the filter
     df["R_bw"] = smooth(df["R_bw"], days=1)
     df["R_tot"] = df["R_f"] + df["R_bw"]
-
 
     dates = werkzaamheden_dates()[strang]
     dates = dates[dates > df.dPdQ.dropna().index[0]]
@@ -88,5 +86,3 @@ for strang, c in config.iterrows():
     fig_path = os.path.join(res_folder, f"Putweerstandcoefficient - {strang}.png")
     fig.savefig(fig_path, dpi=300)
     plt.close(fig)
-
-

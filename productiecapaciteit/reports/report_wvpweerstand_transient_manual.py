@@ -11,15 +11,11 @@ from productiecapaciteit import plot_styles_dir, results_dir
 from productiecapaciteit.reports.report_wvpweerstand_transient import (
     CONFIG_FN,
     DEFAULT_KD_BOUNDS_M2_PER_D,
-    LEGACY_RESULTS_SUBDIR,
-    LEGACY_TRANSIENT_START_WORKBOOK,
-    LEGACY_TRANSIENT_WORKBOOK,
     RESULTS_SUBDIR,
     TRANSIENT_START_WORKBOOK,
     TRANSIENT_WORKBOOK,
     configure_logging,
     default_transient_coefficients,
-    first_existing_path,
     load_observations,
     plot_fit,
     read_series_workbook,
@@ -84,15 +80,12 @@ def configure_manual_logging(output_dir):
 
 
 def source_transient_workbook():
-    """Return the preferred existing transient coefficient workbook."""
+    """Return the calibrated workbook if it exists, else the starting-value workbook."""
     output_dir = results_dir / RESULTS_SUBDIR
-    legacy_output_dir = results_dir / LEGACY_RESULTS_SUBDIR
-    return first_existing_path(
-        output_dir / TRANSIENT_WORKBOOK,
-        output_dir / TRANSIENT_START_WORKBOOK,
-        legacy_output_dir / LEGACY_TRANSIENT_WORKBOOK,
-        legacy_output_dir / LEGACY_TRANSIENT_START_WORKBOOK,
-    )
+    coefficient_fp = output_dir / TRANSIENT_WORKBOOK
+    if coefficient_fp.exists():
+        return coefficient_fp
+    return output_dir / TRANSIENT_START_WORKBOOK
 
 
 def coefficients_for_manual_case(

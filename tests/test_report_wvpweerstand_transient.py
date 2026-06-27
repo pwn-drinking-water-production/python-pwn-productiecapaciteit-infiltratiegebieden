@@ -10,11 +10,12 @@ import productiecapaciteit.reports.report_wvpweerstand_transient_manual as manua
 import productiecapaciteit.src.weerstand_pandasaccessors as accessor_module
 from productiecapaciteit.reports.report_wvpweerstand_transient import (
     default_transient_coefficients,
-    fit_leakage_resistance,
+    fit_transient_coefficients,
     read_series_workbook,
     reconstruct_aquifer_drawdown,
     resample_transient_observations,
-    transient_drawdown_for_leakage,
+    transient_coefficients_from_sheet,
+    transient_drawdown_for_coefficients,
     write_series_workbook,
 )
 from productiecapaciteit.reports.report_wvpweerstand_transient_initial import transient_coefficients_from_wvp
@@ -60,6 +61,22 @@ def _steady_coefficients_for_known_kd(kd=100.0, leakage_resistance_d=120.0):
     })
 
 
+def _write_filter_workbook(tmp_path, strangen):
+    filter_dir = tmp_path / "Filterweerstand"
+    filter_dir.mkdir(exist_ok=True)
+    with pd.ExcelWriter(filter_dir / "Filterweerstand_modelcoefficienten.xlsx") as writer:
+        for strang in strangen:
+            _filter_coefficients().to_excel(writer, sheet_name=strang, index=False)
+
+
+def _patch_main_environment(monkeypatch, tmp_path, config):
+    monkeypatch.setattr(report, "results_dir", tmp_path)
+    monkeypatch.setattr(report, "plot_styles_dir", tmp_path)
+    monkeypatch.setattr(report, "get_config", lambda fn: config)
+    monkeypatch.setattr(report.plt.style, "use", lambda *args, **kwargs: None)
+    monkeypatch.setattr(report, "plot_fit", lambda *args, **kwargs: tmp_path / "plot.png")
+
+
 def test_reconstruct_aquifer_drawdown_uses_gws1_and_filter_fallback():
     index = pd.date_range("2020-01-01", periods=2, freq="D")
     df = pd.DataFrame(
@@ -94,7 +111,26 @@ def test_transient_workbook_roundtrip(tmp_path):
     assert actual["Q100"]["leakage_resistance_d"] == pytest.approx(123.0)
     assert actual["IK102"]["leakage_resistance_d"] == pytest.approx(456.0)
     assert "gewijzigd" in actual["Q100"].index
-    assert "wvpt_fit_success" not in actual["Q100"].index
+
+
+def test_default_coefficients_use_fixed_storage_and_radius():
+    coefficients = default_transient_coefficients()
+
+    assert coefficients["well_radius_m"] == pytest.approx(0.3)
+    assert coefficients["storage_coefficient"] == pytest.approx(0.2)
+    assert report.DEFAULT_WELL_RADIUS_M == pytest.approx(0.3)
+    assert report.DEFAULT_STORAGE_COEFFICIENT == pytest.approx(0.2)
+
+
+def test_force_physical_constants_overrides_stored_values():
+    stored = default_transient_coefficients(well_radius_m=0.15, storage_coefficient=0.45)
+
+    forced = report.force_physical_constants(stored)
+
+    assert forced["well_radius_m"] == pytest.approx(0.3)
+    assert forced["storage_coefficient"] == pytest.approx(0.2)
+    # The fitted parameters are untouched.
+    assert forced["leakage_resistance_d"] == stored["leakage_resistance_d"]
 
 
 def test_read_series_workbook_required_raises_for_missing_file(tmp_path):
@@ -167,7 +203,7 @@ def test_report_uses_all_resampled_timesteps_by_default():
     assert report.RESAMPLE_FREQUENCY == "12h"
 
 
-def test_transient_drawdown_for_leakage_uses_zero_initial_condition(monkeypatch):
+def test_transient_drawdown_for_coefficients_uses_zero_initial_condition(monkeypatch):
     index = pd.date_range("2020-01-01", periods=3, freq="D")
     dfm = pd.DataFrame({"Q": np.ones(index.size)}, index=index)
     coefficients = default_transient_coefficients()
@@ -179,8 +215,9 @@ def test_transient_drawdown_for_leakage_uses_zero_initial_condition(monkeypatch)
 
     monkeypatch.setattr(accessor_module, "objective", fake_objective)
 
-    actual = transient_drawdown_for_leakage(
+    actual = transient_drawdown_for_coefficients(
         100.0,
+        200.0,
         dfm,
         coefficients,
         _ci(),
@@ -190,92 +227,111 @@ def test_transient_drawdown_for_leakage_uses_zero_initial_condition(monkeypatch)
     np.testing.assert_allclose(actual.to_numpy(), 0.0)
 
 
-def test_fit_leakage_resistance_recovers_synthetic_value():
-    true_leakage = 80.0
-    steady = _steady_coefficients_for_known_kd(
-        kd=100.0,
+def test_fit_transient_coefficients_recovers_synthetic_values():
+    true_kd = 80.0
+    true_leakage = 150.0
+    ci = _ci()
+    index = pd.date_range("2020-01-01", periods=60, freq="D")
+    # Several flow steps so the transient response constrains both parameters.
+    flow = np.zeros(index.size)
+    flow[5:20] = 12.0
+    flow[20:35] = 4.0
+    flow[35:50] = 16.0
+    flow[50:] = 8.0
+
+    truth = default_transient_coefficients(
+        kd_ref_m2_per_d=true_kd,
         leakage_resistance_d=true_leakage,
     )
-    initial_transient = default_transient_coefficients(leakage_resistance_d=200.0)
-    true_transient = default_transient_coefficients(leakage_resistance_d=true_leakage)
-    ci = _ci()
-    index = pd.date_range("2020-01-01", periods=18, freq="D")
-    flow = np.r_[0.0, np.full(index.size - 1, 10.0)]
-
-    df_a_true = transient_coefficients_from_wvp(steady, ci, true_transient)
-    observed = transient_drawdown_for_leakage(
+    observed = transient_drawdown_for_coefficients(
+        true_kd,
         true_leakage,
         pd.DataFrame({"Q": flow}, index=index),
-        df_a_true,
+        truth,
         ci,
     )
     dfm = pd.DataFrame(
-        {
-            "Q": flow,
-            "drawdown_aquifer": observed.to_numpy(dtype=float),
-        },
+        {"Q": flow, "drawdown_aquifer": observed.to_numpy(dtype=float)},
         index=index,
     )
-    df_a_initial = df_a_true.copy()
-    df_a_initial["leakage_resistance_d"] = initial_transient["leakage_resistance_d"]
+    seed = truth.copy()
+    seed["kD_ref_m2_per_d"] = 200.0
+    seed["leakage_resistance_d"] = 500.0
 
-    result = fit_leakage_resistance(
-        dfm,
-        df_a_initial,
-        ci,
-        leakage_bounds_d=(10.0, 500.0),
-    )
+    result = fit_transient_coefficients(dfm, seed, ci)
 
-    assert result["coefficients"]["leakage_resistance_d"] == pytest.approx(
-        true_leakage,
-        rel=0.05,
-    )
+    assert result["coefficients"]["kD_ref_m2_per_d"] == pytest.approx(true_kd, rel=0.1)
+    assert result["coefficients"]["leakage_resistance_d"] == pytest.approx(true_leakage, rel=0.1)
     assert result["optimizer_result"].success is True
-    assert set(result["coefficients"].index) == set(report.TRANSIENT_COEFFICIENT_KEYS)
-    assert "wvpt_fit_success" not in result["coefficients"].index
-    assert result["residuals"].abs().max() < 1e-5
-    assert result["residual_innovations"].abs().max() < 1e-5
+    assert result["residuals"].abs().max() < 1e-3
+    assert result["residual_innovations"].abs().max() < 1e-3
 
 
-def test_fit_leakage_resistance_uses_residual_innovations(monkeypatch):
+def test_fit_transient_coefficients_matches_measured_levels(monkeypatch):
+    # The objective matches drawdown levels directly (not their first differences),
+    # so a measured level with no offset is reproduced and the residuals go to zero.
     true_leakage = 80.0
     index = pd.date_range("2020-01-01", periods=6, freq="D")
     trend = np.arange(index.size, dtype=float)
     dfm = pd.DataFrame(
         {
             "Q": np.full(index.size, 10.0),
-            "drawdown_aquifer": 5.0 + true_leakage / 10.0 * trend,
+            "drawdown_aquifer": true_leakage / 10.0 * trend,
         },
         index=index,
     )
-    steady = _steady_coefficients_for_known_kd()
-    initial = default_transient_coefficients(leakage_resistance_d=200.0)
-    df_a_initial = transient_coefficients_from_wvp(steady, _ci(), initial)
+    seed = default_transient_coefficients(kd_ref_m2_per_d=100.0, leakage_resistance_d=200.0)
 
-    def fake_drawdown(leakage_resistance_d, dfm, df_a_wvpt, ci, **kwargs):
-        return pd.Series(
-            leakage_resistance_d / 10.0 * trend,
-            index=dfm.index,
-        )
+    def fake_drawdown(kd_ref, leakage, dfm, df_a_wvpt, ci, **kwargs):
+        return pd.Series(leakage / 10.0 * trend, index=dfm.index)
 
-    monkeypatch.setattr(report, "transient_drawdown_for_leakage", fake_drawdown)
+    monkeypatch.setattr(report, "transient_drawdown_for_coefficients", fake_drawdown)
 
-    result = fit_leakage_resistance(
+    # Pin kD with a near-degenerate bound so the level behaviour is isolated to leakage.
+    result = fit_transient_coefficients(
         dfm,
-        df_a_initial,
+        seed,
         _ci(),
+        kd_bounds_m2_per_d=(99.999, 100.001),
         leakage_bounds_d=(10.0, 500.0),
     )
 
-    assert result["coefficients"]["leakage_resistance_d"] == pytest.approx(
-        true_leakage,
-        rel=1e-3,
+    assert result["coefficients"]["leakage_resistance_d"] == pytest.approx(true_leakage, rel=1e-3)
+    np.testing.assert_allclose(result["residuals"].to_numpy(), 0.0, atol=1e-6)
+
+
+def test_fit_transient_coefficients_does_not_ignore_constant_offset(monkeypatch):
+    # Contrast with a differencing objective: a constant offset in the measurements
+    # is reflected in the residuals (it is not differenced away).
+    index = pd.date_range("2020-01-01", periods=6, freq="D")
+    trend = np.arange(index.size, dtype=float)
+    dfm = pd.DataFrame(
+        {
+            "Q": np.full(index.size, 10.0),
+            "drawdown_aquifer": 5.0 + 80.0 / 10.0 * trend,
+        },
+        index=index,
     )
-    np.testing.assert_allclose(result["residuals"].to_numpy(), -5.0, atol=1e-6)
-    np.testing.assert_allclose(result["residual_innovations"].to_numpy(), 0.0, atol=1e-6)
+    seed = default_transient_coefficients(kd_ref_m2_per_d=100.0, leakage_resistance_d=200.0)
+
+    def fake_drawdown(kd_ref, leakage, dfm, df_a_wvpt, ci, **kwargs):
+        return pd.Series(leakage / 10.0 * trend, index=dfm.index)
+
+    monkeypatch.setattr(report, "transient_drawdown_for_coefficients", fake_drawdown)
+
+    result = fit_transient_coefficients(
+        dfm,
+        seed,
+        _ci(),
+        kd_bounds_m2_per_d=(99.999, 100.001),
+        leakage_bounds_d=(10.0, 500.0),
+    )
+
+    # The model cannot represent the constant 5 m offset, so the residuals stay non-zero.
+    assert result["residuals"].abs().mean() > 0.5
 
 
-def test_fit_leakage_resistance_penalizes_infeasible_kd_candidates(monkeypatch):
+def test_fit_transient_coefficients_penalizes_infeasible_candidates(monkeypatch):
     index = pd.date_range("2020-01-01", periods=6, freq="D")
     trend = np.arange(index.size, dtype=float)
     dfm = pd.DataFrame(
@@ -285,24 +341,20 @@ def test_fit_leakage_resistance_penalizes_infeasible_kd_candidates(monkeypatch):
         },
         index=index,
     )
-    steady = _steady_coefficients_for_known_kd()
-    initial = default_transient_coefficients(leakage_resistance_d=200.0)
-    df_a_initial = transient_coefficients_from_wvp(steady, _ci(), initial)
+    seed = default_transient_coefficients(kd_ref_m2_per_d=100.0, leakage_resistance_d=200.0)
 
-    def fake_drawdown(leakage_resistance_d, dfm, df_a_wvpt, ci, **kwargs):
-        if leakage_resistance_d > 100.0:
+    def fake_drawdown(kd_ref, leakage, dfm, df_a_wvpt, ci, **kwargs):
+        if leakage > 100.0:
             raise ValueError("cannot bracket kD")
-        return pd.Series(
-            leakage_resistance_d / 10.0 * trend,
-            index=dfm.index,
-        )
+        return pd.Series(leakage / 10.0 * trend, index=dfm.index)
 
-    monkeypatch.setattr(report, "transient_drawdown_for_leakage", fake_drawdown)
+    monkeypatch.setattr(report, "transient_drawdown_for_coefficients", fake_drawdown)
 
-    result = fit_leakage_resistance(
+    result = fit_transient_coefficients(
         dfm,
-        df_a_initial,
+        seed,
         _ci(),
+        kd_bounds_m2_per_d=(99.999, 100.001),
         leakage_bounds_d=(10.0, 500.0),
     )
 
@@ -310,7 +362,7 @@ def test_fit_leakage_resistance_penalizes_infeasible_kd_candidates(monkeypatch):
     assert result["optimizer_result"].success is True
 
 
-def test_fit_leakage_resistance_reports_when_no_candidate_is_feasible(monkeypatch):
+def test_fit_transient_coefficients_reports_when_no_candidate_is_feasible(monkeypatch):
     index = pd.date_range("2020-01-01", periods=3, freq="D")
     dfm = pd.DataFrame(
         {
@@ -319,61 +371,24 @@ def test_fit_leakage_resistance_reports_when_no_candidate_is_feasible(monkeypatc
         },
         index=index,
     )
-    df_a_initial = transient_coefficients_from_wvp(
-        _steady_coefficients_for_known_kd(),
-        _ci(),
-        default_transient_coefficients(leakage_resistance_d=200.0),
-    )
+    seed = default_transient_coefficients(kd_ref_m2_per_d=100.0, leakage_resistance_d=200.0)
 
-    def fake_drawdown(leakage_resistance_d, dfm, df_a_wvpt, ci, **kwargs):
+    def fake_drawdown(kd_ref, leakage, dfm, df_a_wvpt, ci, **kwargs):
         raise ValueError("cannot bracket kD")
 
-    monkeypatch.setattr(report, "transient_drawdown_for_leakage", fake_drawdown)
+    monkeypatch.setattr(report, "transient_drawdown_for_coefficients", fake_drawdown)
 
-    with pytest.raises(RuntimeError, match="No feasible leakage_resistance_d candidate"):
-        fit_leakage_resistance(
+    with pytest.raises(RuntimeError, match="No feasible"):
+        fit_transient_coefficients(
             dfm,
-            df_a_initial,
+            seed,
             _ci(),
+            kd_bounds_m2_per_d=(10.0, 500.0),
             leakage_bounds_d=(10.0, 500.0),
         )
 
 
-def test_initial_report_writes_standalone_starting_workbook(monkeypatch, tmp_path):
-    config = pd.DataFrame(
-        {
-            "nput": [1],
-            "dx_tussenputten": [15.0],
-            "r_mirrorwel": [[]],
-        },
-        index=["OK"],
-    )
-    monkeypatch.setattr(initial_report, "results_dir", tmp_path)
-    monkeypatch.setattr(initial_report, "get_config", lambda fn: config)
-
-    steady_dir = tmp_path / "Wvpweerstand"
-    steady_dir.mkdir()
-    steady = _steady_coefficients_for_known_kd()
-    write_series_workbook(
-        steady_dir / "Wvpweerstand_modelcoefficienten.xlsx",
-        {"OK": steady},
-    )
-
-    initial_report.main(["OK"])
-
-    start_fp = tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_START_WORKBOOK
-    actual = read_series_workbook(start_fp)["OK"]
-
-    assert "offset" not in actual.index
-    assert actual["kD_ref_m2_per_d"] > 0.0
-    assert actual["kD_ref_slope_m2_per_d_per_d"] == pytest.approx(0.0)
-    assert actual.wvpt.leakage_resistance_d == pytest.approx(report.DEFAULT_LEAKAGE_RESISTANCE_D)
-
-
-def test_main_logs_failed_strang_and_persists_successful_standalone_workbook(
-    monkeypatch,
-    tmp_path,
-):
+def test_main_forces_physical_constants_and_persists_calibrated_workbook(monkeypatch, tmp_path):
     config = pd.DataFrame(
         {
             "nput": [1, 1],
@@ -382,15 +397,21 @@ def test_main_logs_failed_strang_and_persists_successful_standalone_workbook(
         },
         index=["OK", "BAD"],
     )
-    monkeypatch.setattr(report, "results_dir", tmp_path)
-    monkeypatch.setattr(report, "plot_styles_dir", tmp_path)
-    monkeypatch.setattr(report, "get_config", lambda fn: config)
-    monkeypatch.setattr(report.plt.style, "use", lambda *args, **kwargs: None)
-    monkeypatch.setattr(report, "plot_fit", lambda *args, **kwargs: tmp_path / "plot.png")
+    _patch_main_environment(monkeypatch, tmp_path, config)
 
-    steady = _steady_coefficients_for_known_kd()
-    ok_start = transient_coefficients_from_wvp(steady, _ci(), default_transient_coefficients())
-    bad_start = transient_coefficients_from_wvp(steady, _ci(), default_transient_coefficients())
+    # The starting workbook deliberately stores the wrong S/r so that the forcing is observable.
+    ok_start = default_transient_coefficients(
+        kd_ref_m2_per_d=50.0,
+        leakage_resistance_d=300.0,
+        well_radius_m=0.15,
+        storage_coefficient=0.45,
+    )
+    bad_start = default_transient_coefficients(
+        kd_ref_m2_per_d=60.0,
+        leakage_resistance_d=400.0,
+        well_radius_m=0.15,
+        storage_coefficient=0.45,
+    )
     transient_dir = tmp_path / report.RESULTS_SUBDIR
     transient_dir.mkdir()
     write_series_workbook(
@@ -398,35 +419,38 @@ def test_main_logs_failed_strang_and_persists_successful_standalone_workbook(
         {"OK": ok_start, "BAD": bad_start},
     )
 
-    filter_dir = tmp_path / "Filterweerstand"
-    filter_dir.mkdir()
-    with pd.ExcelWriter(filter_dir / "Filterweerstand_modelcoefficienten.xlsx") as writer:
-        _filter_coefficients().to_excel(writer, sheet_name="OK", index=False)
-        _filter_coefficients().to_excel(writer, sheet_name="BAD", index=False)
-
+    _write_filter_workbook(tmp_path, ["OK", "BAD"])
     index = pd.date_range("2020-01-01", periods=2, freq="D")
-
-    def fake_load_observations(strang, ci, df_a_filter):
-        return pd.DataFrame(
-            {
-                "Q": [10.0, 10.0],
-                "drawdown_aquifer": [1.0, 1.0],
-            },
+    monkeypatch.setattr(
+        report,
+        "load_observations",
+        lambda strang, ci, df_a_filter: pd.DataFrame(
+            {"Q": [10.0, 10.0], "drawdown_aquifer": [1.0, 1.0]},
             index=index,
-        )
+        ),
+    )
 
-    def fake_fit_leakage_resistance(dfm, df_a_wvpt, ci, **kwargs):
+    captured = {}
+
+    def fake_fit(dfm, df_a_wvpt, ci, **kwargs):
+        captured[ci.name] = {
+            "r": float(df_a_wvpt["well_radius_m"]),
+            "S": float(df_a_wvpt["storage_coefficient"]),
+        }
         if ci.name == "BAD":
             raise ValueError("fit failed")
+        coeff = df_a_wvpt.copy()
+        coeff["kD_ref_m2_per_d"] = 123.0
+        coeff["leakage_resistance_d"] = 77.0
+        coeff[report.TRANSIENT_MODIFIED_KEY] = pd.Timestamp.now()
         return {
-            "coefficients": default_transient_coefficients(leakage_resistance_d=77.0),
+            "coefficients": transient_coefficients_from_sheet(coeff),
             "modeled": pd.Series([1.0, 1.0], index=dfm.index),
             "residuals": pd.Series([0.0, 0.0], index=dfm.index),
             "optimizer_result": None,
         }
 
-    monkeypatch.setattr(report, "load_observations", fake_load_observations)
-    monkeypatch.setattr(report, "fit_leakage_resistance", fake_fit_leakage_resistance)
+    monkeypatch.setattr(report, "fit_transient_coefficients", fake_fit)
 
     report.main(["OK", "BAD"])
 
@@ -434,20 +458,29 @@ def test_main_logs_failed_strang_and_persists_successful_standalone_workbook(
     actual = read_series_workbook(transient_fp)
     log_text = (tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_LOG).read_text()
 
+    # Forcing is applied to the seed handed to the fit.
+    assert captured["OK"]["r"] == pytest.approx(0.3)
+    assert captured["OK"]["S"] == pytest.approx(0.2)
+
     assert set(actual) == {"OK", "BAD"}
-    assert "offset" not in actual["OK"].index
     assert set(actual["OK"].index) == set(report.TRANSIENT_COEFFICIENT_KEYS)
+    assert actual["OK"]["kD_ref_m2_per_d"] == pytest.approx(123.0)
     assert actual["OK"]["leakage_resistance_d"] == pytest.approx(77.0)
+    assert actual["OK"]["well_radius_m"] == pytest.approx(0.3)
+    assert actual["OK"]["storage_coefficient"] == pytest.approx(0.2)
     assert actual["OK"].wvpt.leakage_resistance_d == pytest.approx(77.0)
-    assert actual["BAD"]["leakage_resistance_d"] == pytest.approx(bad_start["leakage_resistance_d"])
+
+    # The failed strang keeps its seed parameters but with forced S/r.
+    assert actual["BAD"]["kD_ref_m2_per_d"] == pytest.approx(60.0)
+    assert actual["BAD"]["leakage_resistance_d"] == pytest.approx(400.0)
+    assert actual["BAD"]["well_radius_m"] == pytest.approx(0.3)
+    assert actual["BAD"]["storage_coefficient"] == pytest.approx(0.2)
+
     assert "BAD" in log_text
     assert "fit failed" in log_text
 
 
-def test_main_reads_legacy_transient_workbook_and_writes_new_name(
-    monkeypatch,
-    tmp_path,
-):
+def _make_source_selection_env(monkeypatch, tmp_path):
     config = pd.DataFrame(
         {
             "nput": [1],
@@ -456,55 +489,65 @@ def test_main_reads_legacy_transient_workbook_and_writes_new_name(
         },
         index=["OK"],
     )
-    monkeypatch.setattr(report, "results_dir", tmp_path)
-    monkeypatch.setattr(report, "plot_styles_dir", tmp_path)
-    monkeypatch.setattr(report, "get_config", lambda fn: config)
-    monkeypatch.setattr(report.plt.style, "use", lambda *args, **kwargs: None)
-    monkeypatch.setattr(report, "plot_fit", lambda *args, **kwargs: tmp_path / "plot.png")
-
-    steady = _steady_coefficients_for_known_kd()
-    legacy_start = transient_coefficients_from_wvp(steady, _ci(), default_transient_coefficients())
-    legacy_dir = tmp_path / report.LEGACY_RESULTS_SUBDIR
-    legacy_dir.mkdir()
-    write_series_workbook(
-        legacy_dir / report.LEGACY_TRANSIENT_START_WORKBOOK,
-        {"OK": legacy_start},
-    )
-
-    filter_dir = tmp_path / "Filterweerstand"
-    filter_dir.mkdir()
-    with pd.ExcelWriter(filter_dir / "Filterweerstand_modelcoefficienten.xlsx") as writer:
-        _filter_coefficients().to_excel(writer, sheet_name="OK", index=False)
-
+    _patch_main_environment(monkeypatch, tmp_path, config)
+    _write_filter_workbook(tmp_path, ["OK"])
     index = pd.date_range("2020-01-01", periods=2, freq="D")
-
     monkeypatch.setattr(
         report,
         "load_observations",
-        lambda strang, ci, df_a_filter: pd.DataFrame(
-            {
-                "Q": [10.0, 10.0],
-                "drawdown_aquifer": [1.0, 1.0],
-            },
+        lambda *args, **kwargs: pd.DataFrame(
+            {"Q": [10.0, 10.0], "drawdown_aquifer": [1.0, 1.0]},
             index=index,
         ),
     )
-    monkeypatch.setattr(
-        report,
-        "fit_leakage_resistance",
-        lambda dfm, df_a_wvpt, ci, **kwargs: {
-            "coefficients": default_transient_coefficients(leakage_resistance_d=77.0),
+
+    captured = {}
+
+    def fake_fit(dfm, df_a_wvpt, ci, **kwargs):
+        captured["seed_kd"] = float(df_a_wvpt["kD_ref_m2_per_d"])
+        coeff = df_a_wvpt.copy()
+        coeff["leakage_resistance_d"] = 77.0
+        coeff[report.TRANSIENT_MODIFIED_KEY] = pd.Timestamp.now()
+        return {
+            "coefficients": transient_coefficients_from_sheet(coeff),
             "modeled": pd.Series([1.0, 1.0], index=dfm.index),
             "residuals": pd.Series([0.0, 0.0], index=dfm.index),
             "optimizer_result": None,
-        },
+        }
+
+    monkeypatch.setattr(report, "fit_transient_coefficients", fake_fit)
+    transient_dir = tmp_path / report.RESULTS_SUBDIR
+    transient_dir.mkdir()
+    return captured, transient_dir
+
+
+def test_main_seeds_from_startwaarden_when_no_modelcoefficienten(monkeypatch, tmp_path):
+    captured, transient_dir = _make_source_selection_env(monkeypatch, tmp_path)
+    write_series_workbook(
+        transient_dir / report.TRANSIENT_START_WORKBOOK,
+        {"OK": default_transient_coefficients(kd_ref_m2_per_d=11.0)},
     )
 
     report.main(["OK"])
 
-    new_fp = tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_WORKBOOK
-    assert new_fp.exists()
-    assert not (tmp_path / report.RESULTS_SUBDIR / report.LEGACY_TRANSIENT_WORKBOOK).exists()
+    assert captured["seed_kd"] == pytest.approx(11.0)
+    assert (transient_dir / report.TRANSIENT_WORKBOOK).exists()
+
+
+def test_main_seeds_from_modelcoefficienten_when_present(monkeypatch, tmp_path):
+    captured, transient_dir = _make_source_selection_env(monkeypatch, tmp_path)
+    write_series_workbook(
+        transient_dir / report.TRANSIENT_START_WORKBOOK,
+        {"OK": default_transient_coefficients(kd_ref_m2_per_d=11.0)},
+    )
+    write_series_workbook(
+        transient_dir / report.TRANSIENT_WORKBOOK,
+        {"OK": default_transient_coefficients(kd_ref_m2_per_d=22.0)},
+    )
+
+    report.main(["OK"])
+
+    assert captured["seed_kd"] == pytest.approx(22.0)
 
 
 def test_manual_report_default_cases_cover_radius_storage_grid():
@@ -594,3 +637,34 @@ def test_manual_report_writes_summary_plots_and_manual_workbook(monkeypatch, tmp
     assert set(manual_sheets) == {"OK_manual_r010", "OK_manual_r040"}
     assert (tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_START_WORKBOOK).exists()
     assert not (tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_WORKBOOK).exists()
+
+
+def test_initial_report_writes_standalone_starting_workbook(monkeypatch, tmp_path):
+    config = pd.DataFrame(
+        {
+            "nput": [1],
+            "dx_tussenputten": [15.0],
+            "r_mirrorwel": [[]],
+        },
+        index=["OK"],
+    )
+    monkeypatch.setattr(initial_report, "results_dir", tmp_path)
+    monkeypatch.setattr(initial_report, "get_config", lambda fn: config)
+
+    steady_dir = tmp_path / "Wvpweerstand"
+    steady_dir.mkdir()
+    steady = _steady_coefficients_for_known_kd()
+    write_series_workbook(
+        steady_dir / "Wvpweerstand_modelcoefficienten.xlsx",
+        {"OK": steady},
+    )
+
+    initial_report.main(["OK"])
+
+    start_fp = tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_START_WORKBOOK
+    actual = read_series_workbook(start_fp)["OK"]
+
+    assert "offset" not in actual.index
+    assert actual["kD_ref_m2_per_d"] > 0.0
+    assert actual["kD_ref_slope_m2_per_d_per_d"] == pytest.approx(0.0)
+    assert actual.wvpt.leakage_resistance_d == pytest.approx(report.DEFAULT_LEAKAGE_RESISTANCE_D)
