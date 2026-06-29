@@ -5,8 +5,10 @@ from scipy.integrate import quad
 from scipy.interpolate import PchipInterpolator
 from scipy.special import k0
 
+import productiecapaciteit.src.wvp_transient_funs as funs
 from productiecapaciteit.src.wvp_transient_funs import (
     _kd_grid_regime,
+    build_multiwell_geometry,
     hantush_variable_kd,
     objective,
 )
@@ -473,3 +475,60 @@ def test_kd_grid_banded_regime_matches_quad(leakage_resistance, n_per_step, rtol
     )
     assert np.isfinite(fast).all()
     np.testing.assert_allclose(fast, reference, rtol=rtol, atol=1e-6)
+
+
+def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch):
+    # Only the well whose head is of interest carries a finite well radius: its term sits
+    # at alpha^2 = r_well^2 * S / 4 and gets the exact near-window integral. Every other
+    # well in the series and every mirror well is an infinitely small point source that
+    # rides the far convolution only. Restricting the (expensive) near window to the target
+    # is the whole point of the optimisation, but it is invisible in the output -- neighbour
+    # terms are grid-resolved, so the near window and the far kernel agree on them to ~1e-4
+    # (see test_dp_model_multiwell_kd_grid_matches_gauss). So this pins the *mechanism*: the
+    # finite-radius near-window integrator is only ever evaluated with the target alpha^2.
+    # Re-widening the near window to neighbours (the prior alpha^2 <= w_near rule) would make
+    # neighbour alpha^2 values reach the integrator and fail this test.
+    seen_alpha2 = []
+    original = funs._kd_antiderivative_well_function
+
+    def spy(kappa, alpha2):
+        seen_alpha2.append(float(alpha2))
+        return original(kappa, alpha2)
+
+    monkeypatch.setattr(funs, "_kd_antiderivative_well_function", spy)
+
+    storage, well_radius, leakage = 0.2, 0.2, 200.0  # leakage 200 d -> long_memory, not banded
+    alpha = (well_radius**2 * storage / 4.0) ** 0.5
+    beta = (1.0 / (leakage * storage)) ** 0.5
+    target_alpha2 = alpha * alpha
+
+    # A close neighbour at dx=15 m (eff alpha^2 = 11.25) plus an image well: under the old
+    # alpha^2 <= w_near rule both would have been pulled into the near window.
+    multiwell, _counts = build_multiwell_geometry(
+        15.0, [(-1.0, 50.0)], 3, target_well_index=1, distance_scale=1.0 / well_radius
+    )
+    neighbour_alpha2 = sorted({(distance * alpha) ** 2 for _multi, distance in multiwell})
+    assert neighbour_alpha2[1] > target_alpha2 * 100.0  # the nearest neighbour is far above the target
+
+    index, kD, q_obs = _variable_kd_synthetic_case(periods=120)
+    time_days = np.asarray((index - index[0]) / pd.Timedelta("1D"), dtype=float)
+    cumulative_kd = PchipInterpolator(time_days, kD).antiderivative()(time_days)
+    cumulative_kd -= cumulative_kd[0]
+    regime, *_ = _kd_grid_regime(beta, time_days, cumulative_kd, 8)
+    assert regime == "long_memory"  # the banded regime intentionally keeps every term near
+
+    objective(
+        [alpha, beta],
+        return_result=True,
+        index=index,
+        Q_obs=q_obs,
+        kD=kD,
+        dt_lower=pd.Timedelta("1D"),
+        multiwell=multiwell,
+        multiwell_contains_r_self=True,
+        initial_condition="zero",
+        integration_method="kd_grid",
+    )
+
+    assert seen_alpha2, "the finite-radius near-window integrator was never exercised"
+    assert max(seen_alpha2) <= target_alpha2 * (1.0 + 1e-9)

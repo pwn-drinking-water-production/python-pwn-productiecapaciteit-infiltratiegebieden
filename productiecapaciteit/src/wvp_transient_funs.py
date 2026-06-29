@@ -766,6 +766,7 @@ def hantush_variable_kd(alpha, beta, kD, **pextra):
             cumulative_kd_fun,
             cumulative_kd_offset,
             cumulative_kd,
+            finite_radius_alpha2=alpha * alpha,
             n_per_step=n_per_step,
             near_steps=near_steps,
         )
@@ -991,6 +992,7 @@ def _variable_kd_rate_drawdown_kd_grid(
     cumulative_kd_offset,
     cumulative_kd,
     *,
+    finite_radius_alpha2,
     n_per_step,
     near_steps,
 ):
@@ -1005,11 +1007,20 @@ def _variable_kd_rate_drawdown_kd_grid(
     ``alpha2_terms`` is an ``(n_terms, 2)`` array of ``(multiplicity, alpha^2)`` for the
     multiwell superposition (self well, neighbours and image wells). By linearity the
     whole superposition is a single convolution with the multiplicity-weighted sum of
-    the per-term kernels, so all wells share one grid and one FFT. Only terms whose
-    kernel is steep near the diagonal -- the small-``alpha^2`` finite-radius self well
-    and immediate neighbours -- need the exact near-window integral on the data nodes;
-    distant point-source wells are smooth and enter through the combined far kernel only.
-    This is O(nt log nt) instead of the O(nt^2) ``gauss``/``quad`` paths.
+    the per-term kernels, so all wells share one grid and one FFT.
+
+    Only the well at which the head is of interest carries a **finite well radius**: its
+    term sits at ``alpha^2 == finite_radius_alpha2`` (= ``r_well^2 * S / 4``), the smallest
+    and steepest kernel, and gets the exact near-window integral on the data nodes that
+    resolves its sub-grid diagonal peak. All other wells in the series and every mirror
+    well are modelled with an **infinitely small well radius** (point sources): their
+    kernels are smooth at the relevant distances and ride the combined far kernel only,
+    which is what makes them cheap. This is O(nt log nt) instead of the O(nt^2)
+    ``gauss``/``quad`` paths.
+
+    (The banded very-leaky regime keeps every term in the near window because it skips the
+    far convolution entirely -- the near window is then the whole solver -- but the
+    physics is unchanged: still a finite radius only for the target term.)
     """
     alpha2_terms = np.atleast_2d(np.asarray(alpha2_terms, dtype=float))
     nt = time_days.size
@@ -1052,13 +1063,19 @@ def _variable_kd_rate_drawdown_kd_grid(
         near_cells = near_base
     w_near = near_cells * dk
 
-    # Steep (small-alpha^2) terms get the exact near window; smooth point-source terms
-    # ride entirely on the combined far kernel. With no far convolution (banded) every
-    # term uses the near window.
+    # Only the finite-radius target term (the well of interest, at alpha^2 ==
+    # finite_radius_alpha2 = r_well^2 * S / 4) gets the exact near window; every other well
+    # in the series and every mirror well is an infinitely small point source and rides the
+    # combined far kernel only. The <= comparison (with a tiny relative tolerance for the
+    # squaring round-off) selects the term(s) clipped to the well radius and nothing farther;
+    # an off-well observation point has no such term, so it is a pure point-source
+    # superposition. With no far convolution (banded) every term must use the near window
+    # because it is the whole solver, but the physics is the same: a finite radius only for
+    # the target term, point sources elsewhere.
     if banded:
         near_term_mask = np.ones(alpha2_terms.shape[0], dtype=bool)
     else:
-        near_term_mask = alpha2_terms[:, 1] <= w_near
+        near_term_mask = alpha2_terms[:, 1] <= finite_radius_alpha2 * (1.0 + 1e-9)
 
     mults = alpha2_terms[:, 0]
     alpha2s = alpha2_terms[:, 1]
