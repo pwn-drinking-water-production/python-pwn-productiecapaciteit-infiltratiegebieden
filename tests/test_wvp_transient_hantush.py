@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 import pytest
-from pastas.rfunc import HantushWellModel
 from scipy.integrate import quad
+from scipy.interpolate import PchipInterpolator
 from scipy.special import k0
 
 from productiecapaciteit.src.wvp_transient_funs import (
+    _kd_grid_regime,
     hantush_variable_kd,
     objective,
 )
@@ -43,6 +44,7 @@ def hantush_case():
 
 
 def test_constant_transmissivity_matches_pastas_hantush_well_model(hantush_case):
+    HantushWellModel = pytest.importorskip("pastas.rfunc").HantushWellModel
     actual = hantush_variable_kd(
         hantush_case["alpha"],
         hantush_case["beta"],
@@ -421,6 +423,7 @@ def test_kd_grid_blocking_stays_finite_and_accurate_over_long_span():
 
 
 def test_kd_grid_matches_pastas_hantush_well_model_constant_kd(hantush_case):
+    HantushWellModel = pytest.importorskip("pastas.rfunc").HantushWellModel
     fast = hantush_variable_kd(
         hantush_case["alpha"], hantush_case["beta"],
         np.full(hantush_case["index"].size, hantush_case["kD"]),
@@ -434,3 +437,39 @@ def test_kd_grid_matches_pastas_hantush_well_model_constant_kd(hantush_case):
     expected = np.zeros(hantush_case["index"].size)
     expected[1:] = HantushWellModel.numpy_step(gain, a, b, hantush_case["radius"], elapsed_days[1:])
     np.testing.assert_allclose(fast, expected, rtol=5e-3, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("leakage_resistance", "n_per_step", "rtol"),
+    [(5.0, 16, 1.5e-2), (3.0, 16, 2.0e-2), (8.0, 8, 1.6e-2)],
+)
+def test_kd_grid_banded_regime_matches_quad(leakage_resistance, n_per_step, rtol):
+    # Very leaky aquifers drive beta high so kd_grid takes its dedicated "banded"
+    # direct-near-window branch (the far convolution is skipped). No other kd_grid test
+    # reaches it. The branch is first-order in dk, so its accuracy is looser than the
+    # long_memory/blocked paths; this asserts the branch actually runs (via the public
+    # regime classifier) AND bounds its error against the quad reference.
+    index, kD, q_obs = _variable_kd_synthetic_case(periods=120)
+    storage = 0.2
+    alpha = (0.2**2 * storage / 4.0) ** 0.5
+    beta = (1.0 / (leakage_resistance * storage)) ** 0.5
+
+    time_days = np.asarray((index - index[0]) / pd.Timedelta("1D"), dtype=float)
+    cumulative_kd = PchipInterpolator(time_days, kD).antiderivative()(time_days)
+    cumulative_kd -= cumulative_kd[0]
+    regime, _dk, _n_grid, _mem_cells = _kd_grid_regime(beta, time_days, cumulative_kd, n_per_step)
+    assert regime == "banded"
+
+    fast = hantush_variable_kd(
+        alpha, beta, kD, index=index, Q_obs=q_obs,
+        initial_condition="zero", integration_method="kd_grid", n_per_step=n_per_step,
+    )
+    reference = hantush_variable_kd(
+        alpha, beta, kD, index=index, Q_obs=q_obs,
+        initial_condition="zero", integration_method="quad",
+        # The kd_grid banded error bounded here is ~1e-2, so a 1e-9 reference is ample
+        # and far cheaper than 1e-11.
+        quad_epsabs=1e-10, quad_epsrel=1e-9,
+    )
+    assert np.isfinite(fast).all()
+    np.testing.assert_allclose(fast, reference, rtol=rtol, atol=1e-6)

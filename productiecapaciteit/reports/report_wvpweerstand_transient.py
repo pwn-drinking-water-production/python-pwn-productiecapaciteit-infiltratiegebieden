@@ -317,6 +317,9 @@ def transient_drawdown_for_coefficients(
             ci.r_mirrorwel,
             target_well_index=target_well_index,
             initial_condition=initial_condition,
+            # Observations are 12 h interval means labeled at the right edge
+            # (resample label="right"); apply each mean on the interval it covers.
+            flow_label="right",
         )
     ).rename("wvpt_drawdown")
 
@@ -371,6 +374,21 @@ def fit_transient_coefficients(  # noqa: C901
     best_fit = {"cost": np.inf, "params": None, "modeled": None}
     last_model_error = {"message": ""}
 
+    def rank_cost(residuals):
+        # Rank best_fit by the same robust loss least_squares minimizes (not raw SSE), so the
+        # feasible fallback below selects the robust optimum among feasible points. Monotonic
+        # surrogates of scipy's robust cost are sufficient for ranking.
+        if loss == "arctan":
+            return float(np.sum(np.arctan((residuals / f_scale) ** 2)))
+        if loss == "soft_l1":
+            return float(np.sum(np.sqrt(1.0 + (residuals / f_scale) ** 2) - 1.0))
+        if loss == "cauchy":
+            return float(np.sum(np.log1p((residuals / f_scale) ** 2)))
+        if loss == "huber":
+            z = (residuals / f_scale) ** 2
+            return float(np.sum(np.where(z <= 1.0, z, 2.0 * np.sqrt(z) - 1.0)))
+        return float(np.dot(residuals, residuals))
+
     def evaluate(kd_ref, leakage):
         key = (kd_ref, leakage)
         if key in model_cache:
@@ -400,7 +418,7 @@ def fit_transient_coefficients(  # noqa: C901
         residuals = np.full(n_resid, penalty, dtype=float)
         good = np.isfinite(modeled_values[valid])
         residuals[good] = (modeled_values[valid] - observed[valid])[good]
-        cost = float(np.dot(residuals, residuals))
+        cost = rank_cost(residuals)
         if cost < best_fit["cost"]:
             best_fit.update({"cost": cost, "params": (kd_ref, leakage), "modeled": modeled})
         return residuals
@@ -452,11 +470,13 @@ def fit_transient_coefficients(  # noqa: C901
 
     kd_ref = float(np.exp(result.x[0]))
     leakage = float(np.exp(result.x[1]))
+    used_fallback = False
     modeled, error = evaluate(kd_ref, leakage)
     if error is not None:
         if best_fit["modeled"] is None:
             msg = "Optimizer ended at an infeasible parameter pair and no feasible candidate was evaluated"
             raise RuntimeError(msg) from error
+        used_fallback = True
         kd_ref, leakage = best_fit["params"]
         modeled = best_fit["modeled"]
 
@@ -476,6 +496,7 @@ def fit_transient_coefficients(  # noqa: C901
             name="wvpt_residual_innovation",
         ),
         "optimizer_result": result,
+        "used_fallback": used_fallback,
     }
 
 
@@ -643,7 +664,11 @@ def main(strangen=None):
                 coeff["well_radius_m"],
             )
             optimizer_result = fit_result.get("optimizer_result")
-            if optimizer_result is not None and np.any(optimizer_result.active_mask):
+            if (
+                optimizer_result is not None
+                and not fit_result.get("used_fallback")
+                and np.any(optimizer_result.active_mask)
+            ):
                 report_logger.warning(
                     "%s: a fitted parameter hit its bound (active_mask=%s)",
                     strang,
@@ -652,7 +677,7 @@ def main(strangen=None):
 
             fig_path = plot_fit(strang, dfm, calibrated_sheets[strang], fit_result["modeled"], output_dir, ci)
             report_logger.info("Saved figure to %s", fig_path)
-        except (KeyError, FileNotFoundError, ValueError, RuntimeError):
+        except (KeyError, FileNotFoundError, ValueError, RuntimeError, OverflowError, FloatingPointError):
             report_logger.exception("Skipping %s after transient WVP fit failure", strang)
 
 

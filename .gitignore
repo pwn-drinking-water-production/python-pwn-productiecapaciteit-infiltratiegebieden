@@ -161,7 +161,7 @@ cython_debug/
 productiecapaciteit/data/~$strang_props6.xlsx
 ~$*.xlsx
 *.png
-*.png
+*.stale-old*
 productiecapaciteit/src/scratch.py
 productiecapaciteit/reports/wvp_transient_example.py
 productiecapaciteit/reports/report_effect_putfilter.py
