@@ -300,15 +300,21 @@ def test_fit_transient_coefficients_matches_measured_levels(monkeypatch):
     np.testing.assert_allclose(result["residuals"].to_numpy(), 0.0, atol=1e-6)
 
 
-def test_fit_transient_coefficients_does_not_ignore_constant_offset(monkeypatch):
-    # Contrast with a differencing objective: a constant offset in the measurements
-    # is reflected in the residuals (it is not differenced away).
+def test_fit_transient_coefficients_is_a_level_fit_not_a_differencing_fit(monkeypatch):
+    # A constant offset in the measurements pulls the level fit; a differencing
+    # (innovation) objective would ignore it. With model = leakage/10 * trend and
+    # observed = offset + true/10 * trend, the linear least-squares slope is
+    # a* = sum(trend * observed) / sum(trend^2), i.e. leakage is biased away from
+    # the true 80 toward absorbing the offset. An innovation objective would return
+    # exactly 80. This is what makes the two objectives distinguishable.
+    true_leakage = 80.0
+    offset = 5.0
     index = pd.date_range("2020-01-01", periods=6, freq="D")
     trend = np.arange(index.size, dtype=float)
     dfm = pd.DataFrame(
         {
             "Q": np.full(index.size, 10.0),
-            "drawdown_aquifer": 5.0 + 80.0 / 10.0 * trend,
+            "drawdown_aquifer": offset + true_leakage / 10.0 * trend,
         },
         index=index,
     )
@@ -319,16 +325,20 @@ def test_fit_transient_coefficients_does_not_ignore_constant_offset(monkeypatch)
 
     monkeypatch.setattr(report, "transient_drawdown_for_coefficients", fake_drawdown)
 
+    # Plain least squares (loss="linear") so the expected biased value is exact.
     result = fit_transient_coefficients(
         dfm,
         seed,
         _ci(),
         kd_bounds_m2_per_d=(99.999, 100.001),
         leakage_bounds_d=(10.0, 500.0),
+        loss="linear",
     )
 
-    # The model cannot represent the constant 5 m offset, so the residuals stay non-zero.
-    assert result["residuals"].abs().mean() > 0.5
+    expected_slope = float(np.sum(trend * dfm.drawdown_aquifer.to_numpy()) / np.sum(trend**2))
+    expected_leakage = 10.0 * expected_slope
+    assert expected_leakage == pytest.approx(93.64, abs=0.1)  # not 80 -> level fit, not innovation fit
+    assert result["coefficients"]["leakage_resistance_d"] == pytest.approx(expected_leakage, rel=2e-3)
 
 
 def test_fit_transient_coefficients_penalizes_infeasible_candidates(monkeypatch):
@@ -532,6 +542,32 @@ def test_main_seeds_from_startwaarden_when_no_modelcoefficienten(monkeypatch, tm
 
     assert captured["seed_kd"] == pytest.approx(11.0)
     assert (transient_dir / report.TRANSIENT_WORKBOOK).exists()
+
+
+def test_main_carries_over_unprocessed_strang_with_forced_constants(monkeypatch, tmp_path):
+    captured, transient_dir = _make_source_selection_env(monkeypatch, tmp_path)
+    # 'OK' is in the config and gets fitted; 'EXTRA' only exists in the source
+    # workbook and must be carried into the output with forced S/r.
+    write_series_workbook(
+        transient_dir / report.TRANSIENT_START_WORKBOOK,
+        {
+            "OK": default_transient_coefficients(kd_ref_m2_per_d=11.0),
+            "EXTRA": default_transient_coefficients(
+                kd_ref_m2_per_d=33.0,
+                well_radius_m=0.15,
+                storage_coefficient=0.45,
+            ),
+        },
+    )
+
+    report.main(["OK"])
+
+    actual = read_series_workbook(transient_dir / report.TRANSIENT_WORKBOOK)
+    assert set(actual) == {"OK", "EXTRA"}
+    # The carried-over strang keeps its seed kD but gets the forced S/r.
+    assert actual["EXTRA"]["kD_ref_m2_per_d"] == pytest.approx(33.0)
+    assert actual["EXTRA"]["well_radius_m"] == pytest.approx(0.3)
+    assert actual["EXTRA"]["storage_coefficient"] == pytest.approx(0.2)
 
 
 def test_main_seeds_from_modelcoefficienten_when_present(monkeypatch, tmp_path):
