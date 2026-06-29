@@ -11,14 +11,13 @@ poorly identified by drawdown alone) at :data:`DEFAULT_STORAGE_COEFFICIENT` and
 
 Excel data flow (everything lives in ``results/Wvptweerstand/``)
 ---------------------------------------------------------------
-* Seed (input):  ``Wvptweerstand_modelcoefficienten.xlsx`` when it already exists,
-  otherwise ``Wvptweerstand_startwaarden.xlsx`` (created by
-  ``report_wvpweerstand_transient_initial.py``).
+* Seed (input):  ``Wvptweerstand_modelcoefficienten.xlsx`` when it already exists.
 * Result (output): ``Wvptweerstand_modelcoefficienten.xlsx``.
 
-So the very first run starts from the starting-value workbook; every later run
-continues from the previously calibrated workbook. The measurement and filter
-inputs come from ``data/Merged/<strang>.feather`` and
+So the very first run seeds each strang from module defaults
+(:func:`default_transient_coefficients`); every later run continues from the
+previously calibrated workbook. The measurement and filter inputs come from
+``data/Merged/<strang>.feather`` and
 ``results/Filterweerstand/Filterweerstand_modelcoefficienten.xlsx``.
 
 Fitting target
@@ -55,7 +54,6 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
 )
 from productiecapaciteit.src.wvp_transient_funs import (
     build_multiwell_geometry,
-    steady_multiwell_resistance_from_kd,
 )
 
 CONFIG_FN = "strang_props7.csv"
@@ -89,10 +87,8 @@ MIN_TRANSIENT_OBSERVATIONS = 2
 DEFAULT_KD_REF_DATUM = pd.Timestamp("2020-01-01")
 
 RESULTS_SUBDIR = "Wvptweerstand"
-TRANSIENT_START_WORKBOOK = "Wvptweerstand_startwaarden.xlsx"
 TRANSIENT_WORKBOOK = "Wvptweerstand_modelcoefficienten.xlsx"
 TRANSIENT_LOG = "Wvptweerstandcoefficient.log"
-TRANSIENT_INITIAL_LOG = "Wvptweerstand_initial.log"
 TRANSIENT_FIGURE_PREFIX = "Wvptweerstandcoefficient"
 
 TRANSIENT_REFERENCE_KEYS = (
@@ -500,7 +496,7 @@ def plot_fit(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     kd = df_a_wvpt.wvpt.kD_model(dfm.index)
-    multiwell, multiwell_counts = build_multiwell_geometry(
+    _multiwell, multiwell_counts = build_multiwell_geometry(
         ci.dx_tussenputten,
         ci.r_mirrorwel,
         ci.nput,
@@ -509,18 +505,16 @@ def plot_fit(
         include_self=True,
         self_distance=1.0,
     )
-    steady_resistance = steady_multiwell_resistance_from_kd(
-        kd.to_numpy(dtype=float),
-        multiwell,
-        ci.nput,
-        df_a_wvpt.wvpt.leakage_resistance_d,
-        df_a_wvpt.wvpt.well_radius_m,
-    )
-    steady_drawdown = pd.Series(
-        steady_resistance * dfm.Q.to_numpy(dtype=float),
-        index=dfm.index,
-        name="wvpt_steady_drawdown",
-    )
+    steady_drawdown = (
+        -df_a_wvpt.wvpt.dp_steady(
+            dfm.index,
+            dfm.Q,
+            ci.nput,
+            ci.dx_tussenputten,
+            ci.r_mirrorwel,
+            target_well_index=target_well_index,
+        )
+    ).rename("wvpt_steady_drawdown")
     observed = dfm.drawdown_aquifer
     residuals = modeled_drawdown - observed
     innovations = residuals.diff()
@@ -611,21 +605,19 @@ def main(strangen=None):
         raise FileNotFoundError(msg)
     filter_sheets = pd.read_excel(filter_fp, sheet_name=None)
 
-    start_fp = output_dir / TRANSIENT_START_WORKBOOK
     coefficient_fp = output_dir / TRANSIENT_WORKBOOK
-    # Continue from the previously calibrated workbook, or start fresh from the
-    # starting-value workbook on the very first run.
-    source_fp = coefficient_fp if coefficient_fp.exists() else start_fp
-    if not source_fp.exists():
-        msg = (
-            f"No transient WVP coefficients found ({coefficient_fp} or {start_fp}). "
-            "Run report_wvpweerstand_transient_initial.py first."
+    # Continue from the previously calibrated workbook; on the very first run
+    # (no calibrated workbook yet) seed each strang from module defaults.
+    source_sheets = read_series_workbook(coefficient_fp)
+    if source_sheets:
+        report_logger.info("Seeding transient WVP coefficients from %s", coefficient_fp)
+    else:
+        report_logger.info(
+            "No calibrated workbook at %s; seeding each strang from module defaults",
+            coefficient_fp,
         )
-        raise FileNotFoundError(msg)
-    report_logger.info("Seeding transient WVP coefficients from %s", source_fp)
     report_logger.info("Writing calibrated transient WVP coefficients to %s", coefficient_fp)
 
-    source_sheets = read_series_workbook(source_fp, required=True)
     calibrated_sheets = {
         name: force_physical_constants(transient_coefficients_from_sheet(sheet))
         for name, sheet in source_sheets.items()
@@ -634,7 +626,8 @@ def main(strangen=None):
     for strang, ci in config.iterrows():
         report_logger.info("Strang: %s", strang)
         try:
-            seed = force_physical_constants(transient_coefficients_from_sheet(source_sheets[strang]))
+            source_sheet = source_sheets.get(strang, default_transient_coefficients())
+            seed = force_physical_constants(transient_coefficients_from_sheet(source_sheet))
             dfm = load_observations(strang, ci, filter_sheets[strang])
             fit_result = fit_transient_coefficients(dfm, seed, ci)
             calibrated_sheets[strang] = transient_coefficients_from_sheet(fit_result["coefficients"])

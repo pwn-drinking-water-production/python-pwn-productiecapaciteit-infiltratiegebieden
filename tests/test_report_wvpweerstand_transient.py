@@ -5,8 +5,6 @@ import pandas as pd
 import pytest
 
 import productiecapaciteit.reports.report_wvpweerstand_transient as report
-import productiecapaciteit.reports.report_wvpweerstand_transient_initial as initial_report
-import productiecapaciteit.reports.report_wvpweerstand_transient_manual as manual_report
 import productiecapaciteit.src.weerstand_pandasaccessors as accessor_module
 from productiecapaciteit.reports.report_wvpweerstand_transient import (
     default_transient_coefficients,
@@ -17,11 +15,6 @@ from productiecapaciteit.reports.report_wvpweerstand_transient import (
     transient_coefficients_from_sheet,
     transient_drawdown_for_coefficients,
     write_series_workbook,
-)
-from productiecapaciteit.reports.report_wvpweerstand_transient_initial import transient_coefficients_from_wvp
-from productiecapaciteit.src.wvp_transient_funs import (
-    build_multiwell_geometry,
-    steady_multiwell_resistance_from_kd,
 )
 
 
@@ -38,26 +31,6 @@ def _filter_coefficients():
         "datum": [pd.Timestamp("2020-01-01")],
         "offset": [-0.1],
         "slope": [0.0],
-    })
-
-
-def _steady_coefficients_for_known_kd(kd=100.0, leakage_resistance_d=120.0):
-    resistance = steady_multiwell_resistance_from_kd(
-        kd,
-        [(1.0, 1.0)],
-        nput=1,
-        leakage_resistance_d=leakage_resistance_d,
-        well_radius_m=0.2,
-    )
-    return pd.Series({
-        "offset": -float(resistance),
-        "offset_datum": pd.Timestamp("2020-01-01"),
-        "slope": 0.0,
-        "temp_mean": 12.0,
-        "temp_delta": 0.0,
-        "time_offset": 0.0,
-        "method": "Niet",
-        "temp_ref": 12.0,
     })
 
 
@@ -151,38 +124,6 @@ def test_write_series_workbook_reports_excel_lock(monkeypatch, tmp_path):
             workbook,
             {"Q100": default_transient_coefficients(leakage_resistance_d=123.0)},
         )
-
-
-def test_transient_coefficients_from_wvp_creates_standalone_accessor_sheet():
-    steady = _steady_coefficients_for_known_kd()
-    transient = default_transient_coefficients(leakage_resistance_d=123.0)
-    ci = _ci()
-
-    converted = transient_coefficients_from_wvp(steady, ci, transient)
-
-    assert converted.index.is_unique
-    assert set(converted.index) == set(report.TRANSIENT_COEFFICIENT_KEYS)
-    assert "offset" not in converted.index
-    assert converted["kD_ref_m2_per_d"] > 0.0
-    assert converted["kD_ref_slope_m2_per_d_per_d"] == pytest.approx(0.0)
-    assert converted["leakage_resistance_d"] == pytest.approx(123.0)
-    multiwell, _ = build_multiwell_geometry(
-        ci.dx_tussenputten,
-        ci.r_mirrorwel,
-        ci.nput,
-        distance_scale=1.0 / converted["well_radius_m"],
-    )
-    converted_resistance = steady_multiwell_resistance_from_kd(
-        converted["kD_ref_m2_per_d"],
-        multiwell,
-        ci.nput,
-        converted["leakage_resistance_d"],
-        converted["well_radius_m"],
-    )
-    expected_resistance = -float(
-        steady.wvp.a_model_reftemp(pd.DatetimeIndex([steady["offset_datum"]])).iloc[0]
-    )
-    assert converted_resistance == pytest.approx(expected_resistance)
 
 
 def test_resample_transient_observations_requires_positive_drawdown_and_two_rows():
@@ -409,7 +350,7 @@ def test_main_forces_physical_constants_and_persists_calibrated_workbook(monkeyp
     )
     _patch_main_environment(monkeypatch, tmp_path, config)
 
-    # The starting workbook deliberately stores the wrong S/r so that the forcing is observable.
+    # The seed workbook deliberately stores the wrong S/r so that the forcing is observable.
     ok_start = default_transient_coefficients(
         kd_ref_m2_per_d=50.0,
         leakage_resistance_d=300.0,
@@ -425,7 +366,7 @@ def test_main_forces_physical_constants_and_persists_calibrated_workbook(monkeyp
     transient_dir = tmp_path / report.RESULTS_SUBDIR
     transient_dir.mkdir()
     write_series_workbook(
-        transient_dir / report.TRANSIENT_START_WORKBOOK,
+        transient_dir / report.TRANSIENT_WORKBOOK,
         {"OK": ok_start, "BAD": bad_start},
     )
 
@@ -531,16 +472,14 @@ def _make_source_selection_env(monkeypatch, tmp_path):
     return captured, transient_dir
 
 
-def test_main_seeds_from_startwaarden_when_no_modelcoefficienten(monkeypatch, tmp_path):
+def test_main_seeds_from_defaults_when_no_modelcoefficienten(monkeypatch, tmp_path):
     captured, transient_dir = _make_source_selection_env(monkeypatch, tmp_path)
-    write_series_workbook(
-        transient_dir / report.TRANSIENT_START_WORKBOOK,
-        {"OK": default_transient_coefficients(kd_ref_m2_per_d=11.0)},
-    )
+    # No calibrated workbook exists yet, so the strang is seeded from module defaults.
+    assert not (transient_dir / report.TRANSIENT_WORKBOOK).exists()
 
     report.main(["OK"])
 
-    assert captured["seed_kd"] == pytest.approx(11.0)
+    assert captured["seed_kd"] == pytest.approx(report.DEFAULT_KD_REF_M2_PER_D)
     assert (transient_dir / report.TRANSIENT_WORKBOOK).exists()
 
 
@@ -549,7 +488,7 @@ def test_main_carries_over_unprocessed_strang_with_forced_constants(monkeypatch,
     # 'OK' is in the config and gets fitted; 'EXTRA' only exists in the source
     # workbook and must be carried into the output with forced S/r.
     write_series_workbook(
-        transient_dir / report.TRANSIENT_START_WORKBOOK,
+        transient_dir / report.TRANSIENT_WORKBOOK,
         {
             "OK": default_transient_coefficients(kd_ref_m2_per_d=11.0),
             "EXTRA": default_transient_coefficients(
@@ -573,10 +512,6 @@ def test_main_carries_over_unprocessed_strang_with_forced_constants(monkeypatch,
 def test_main_seeds_from_modelcoefficienten_when_present(monkeypatch, tmp_path):
     captured, transient_dir = _make_source_selection_env(monkeypatch, tmp_path)
     write_series_workbook(
-        transient_dir / report.TRANSIENT_START_WORKBOOK,
-        {"OK": default_transient_coefficients(kd_ref_m2_per_d=11.0)},
-    )
-    write_series_workbook(
         transient_dir / report.TRANSIENT_WORKBOOK,
         {"OK": default_transient_coefficients(kd_ref_m2_per_d=22.0)},
     )
@@ -584,123 +519,3 @@ def test_main_seeds_from_modelcoefficienten_when_present(monkeypatch, tmp_path):
     report.main(["OK"])
 
     assert captured["seed_kd"] == pytest.approx(22.0)
-
-
-def test_manual_report_default_cases_cover_radius_storage_grid():
-    actual = {(case["well_radius_m"], case["storage_coefficient"]) for case in manual_report.MANUAL_CASES}
-
-    assert actual == {(r_well, storage) for r_well in (0.10, 0.25, 0.40) for storage in (0.10, 0.20, 0.30)}
-
-
-def test_manual_report_writes_summary_plots_and_manual_workbook(monkeypatch, tmp_path):
-    config = pd.DataFrame(
-        {
-            "nput": [1],
-            "dx_tussenputten": [15.0],
-            "r_mirrorwel": [[]],
-        },
-        index=["OK"],
-    )
-    monkeypatch.setattr(manual_report, "results_dir", tmp_path)
-    monkeypatch.setattr(manual_report, "plot_styles_dir", tmp_path)
-    monkeypatch.setattr(manual_report, "get_config", lambda fn: config)
-
-    steady_dir = tmp_path / "Wvpweerstand"
-    steady_dir.mkdir()
-    steady = _steady_coefficients_for_known_kd()
-    write_series_workbook(
-        steady_dir / "Wvpweerstand_modelcoefficienten.xlsx",
-        {"OK": steady},
-    )
-    transient_dir = tmp_path / report.RESULTS_SUBDIR
-    transient_dir.mkdir()
-    write_series_workbook(
-        transient_dir / report.TRANSIENT_START_WORKBOOK,
-        {"OK": transient_coefficients_from_wvp(steady, _ci(), default_transient_coefficients())},
-    )
-    filter_dir = tmp_path / "Filterweerstand"
-    filter_dir.mkdir()
-    with pd.ExcelWriter(filter_dir / "Filterweerstand_modelcoefficienten.xlsx") as writer:
-        _filter_coefficients().to_excel(writer, sheet_name="OK", index=False)
-
-    index = pd.date_range("2020-01-01", periods=3, freq="D")
-    monkeypatch.setattr(
-        manual_report,
-        "load_observations",
-        lambda strang, ci, df_a_filter: pd.DataFrame(
-            {
-                "Q": [0.0, 10.0, 10.0],
-                "drawdown_aquifer": [1.0, 1.2, 1.3],
-            },
-            index=index,
-        ),
-    )
-
-    def fake_plot_fit(strang, dfm, df_a_wvpt, modeled_drawdown, output_dir, ci, **kwargs):
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        fig_path = output_dir / f"{manual_report.safe_name(strang)}.png"
-        fig_path.write_text("plot")
-        return fig_path
-
-    monkeypatch.setattr(manual_report, "plot_fit", fake_plot_fit)
-
-    summary = manual_report.main(
-        ["OK"],
-        manual_cases=[
-            {
-                "name": "manual_r010",
-                "well_radius_m": 0.1,
-                "storage_coefficient": 0.2,
-                "leakage_resistance_d": 120.0,
-            },
-            {
-                "name": "manual_r040",
-                "well_radius_m": 0.4,
-                "storage_coefficient": 0.2,
-                "leakage_resistance_d": 120.0,
-            },
-        ],
-    )
-
-    output_dir = tmp_path / report.RESULTS_SUBDIR / manual_report.MANUAL_RESULTS_SUBDIR
-    assert (output_dir / manual_report.MANUAL_SUMMARY_CSV).exists()
-    assert (output_dir / manual_report.MANUAL_WORKBOOK).exists()
-    assert set(summary["case"]) == {"manual_r010", "manual_r040"}
-    assert set(summary["well_radius_m"]) == {0.1, 0.4}
-    assert all(Path(path).exists() for path in summary["plot"])
-    manual_sheets = read_series_workbook(output_dir / manual_report.MANUAL_WORKBOOK)
-    assert set(manual_sheets) == {"OK_manual_r010", "OK_manual_r040"}
-    assert (tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_START_WORKBOOK).exists()
-    assert not (tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_WORKBOOK).exists()
-
-
-def test_initial_report_writes_standalone_starting_workbook(monkeypatch, tmp_path):
-    config = pd.DataFrame(
-        {
-            "nput": [1],
-            "dx_tussenputten": [15.0],
-            "r_mirrorwel": [[]],
-        },
-        index=["OK"],
-    )
-    monkeypatch.setattr(initial_report, "results_dir", tmp_path)
-    monkeypatch.setattr(initial_report, "get_config", lambda fn: config)
-
-    steady_dir = tmp_path / "Wvpweerstand"
-    steady_dir.mkdir()
-    steady = _steady_coefficients_for_known_kd()
-    write_series_workbook(
-        steady_dir / "Wvpweerstand_modelcoefficienten.xlsx",
-        {"OK": steady},
-    )
-
-    initial_report.main(["OK"])
-
-    start_fp = tmp_path / report.RESULTS_SUBDIR / report.TRANSIENT_START_WORKBOOK
-    actual = read_series_workbook(start_fp)["OK"]
-
-    assert "offset" not in actual.index
-    assert actual["kD_ref_m2_per_d"] > 0.0
-    assert actual["kD_ref_slope_m2_per_d_per_d"] == pytest.approx(0.0)
-    assert actual.wvpt.leakage_resistance_d == pytest.approx(report.DEFAULT_LEAKAGE_RESISTANCE_D)

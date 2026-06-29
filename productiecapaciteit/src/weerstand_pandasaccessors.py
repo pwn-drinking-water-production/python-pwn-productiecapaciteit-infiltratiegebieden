@@ -7,6 +7,7 @@ from productiecapaciteit.src.wvp_transient_funs import (
     build_multiwell_geometry,
     infer_lower_timestep,
     objective,
+    steady_multiwell_resistance_from_kd,
 )
 
 
@@ -615,6 +616,50 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         if not np.isfinite(drawdown).all():
             raise ValueError("Transient WVP drawdown contains NaN or infinite values")
         return pd.Series(data=-drawdown, index=index, name="wvpt_model_dp")
+
+    def dp_steady(
+        self,
+        index,
+        flow,
+        nput,
+        dx_tussenputten,
+        r_mirrorwel,
+        temp_wvp=None,
+        target_well_index=None,
+    ):
+        """Steady-state leaky-aquifer (De Glee / Hantush-Jacob) drawdown.
+
+        Returns the drawdown each ``flow`` value would cause if it were sustained
+        until equilibrium, evaluated pointwise on ``index`` with the temperature-
+        corrected kD of that timestamp. This is the ``t -> infinity`` limit of
+        :meth:`dp_model`: for a constant flow and constant kD, ``dp_model`` with
+        ``initial_condition="steady"`` reproduces it exactly. Because it ignores the
+        flow history and the storage transient, it is a fast diagnostic reference,
+        not the calibrated forward model.
+
+        ``flow`` is the total row flow in m3/h and the sign convention both match
+        :meth:`dp_model`: drawdown is returned as negative meters.
+        """
+        index = pd.DatetimeIndex(index)
+        flow = self._as_1d_float_array("flow", flow, index)
+        multiwell, _multiwell_counts = self._multiwell_geometry(
+            nput,
+            dx_tussenputten,
+            r_mirrorwel,
+            target_well_index=target_well_index,
+        )
+        kd = self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float)
+        steady_resistance = steady_multiwell_resistance_from_kd(
+            kd,
+            multiwell,
+            nput,
+            self.leakage_resistance_d,
+            self.well_radius_m,
+        )
+        drawdown = steady_resistance * flow
+        if not np.isfinite(drawdown).all():
+            raise ValueError("Steady WVP drawdown contains NaN or infinite values")
+        return pd.Series(data=-drawdown, index=index, name="wvpt_model_dp_steady")
 
 
 @pd.api.extensions.register_dataframe_accessor("leiding")

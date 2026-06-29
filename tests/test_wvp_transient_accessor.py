@@ -134,6 +134,124 @@ def test_wvpt_dp_model_matches_steady_drawdown_for_constant_flow():
     np.testing.assert_allclose(transient.to_numpy(), steady_resistance * flow_m3h, rtol=1e-7)
 
 
+def test_wvpt_dp_steady_matches_steady_resistance_building_block():
+    index = pd.date_range("2020-01-01", periods=4, freq="D")
+    coefficients = _constant_resistance_coefficients(kd=100.0)
+    flow_m3h = np.array([12.0, 24.0, 36.0, 48.0])
+
+    steady = coefficients.wvpt.dp_steady(
+        index, flow_m3h, nput=1, dx_tussenputten=15.0, r_mirrorwel=[]
+    )
+
+    expected_resistance = steady_multiwell_resistance_from_kd(
+        coefficients.wvpt.kD_model(index).to_numpy(dtype=float),
+        [(1.0, 1.0)],
+        nput=1,
+        leakage_resistance_d=coefficients.wvpt.leakage_resistance_d,
+        well_radius_m=coefficients.wvpt.well_radius_m,
+    )
+
+    # Sign convention matches dp_model: drawdown is returned as negative meters.
+    np.testing.assert_allclose(steady.to_numpy(), -(expected_resistance * flow_m3h))
+    assert steady.name == "wvpt_model_dp_steady"
+    assert steady.index.equals(index)
+
+
+def test_wvpt_dp_steady_matches_transient_steady_limit_for_constant_flow():
+    index = pd.date_range("2020-01-01", periods=6, freq="D")
+    coefficients = _constant_resistance_coefficients(kd=100.0)
+    flow_m3h = np.full(index.size, 10.0)
+
+    steady = coefficients.wvpt.dp_steady(
+        index, flow_m3h, nput=1, dx_tussenputten=15.0, r_mirrorwel=[]
+    )
+    transient = coefficients.wvpt.dp_model(
+        index,
+        flow_m3h,
+        nput=1,
+        dx_tussenputten=15.0,
+        r_mirrorwel=[],
+        initial_condition="steady",
+        integration_method="gauss",
+    )
+
+    np.testing.assert_allclose(steady.to_numpy(), transient.to_numpy(), rtol=1e-7)
+
+
+def test_wvpt_dp_steady_respects_multiwell_geometry():
+    index = pd.date_range("2020-01-01", periods=3, freq="D")
+    coefficients = _constant_resistance_coefficients(kd=100.0)
+    flow_m3h = np.full(index.size, 10.0)
+
+    steady = coefficients.wvpt.dp_steady(
+        index,
+        flow_m3h,
+        nput=3,
+        dx_tussenputten=15.0,
+        r_mirrorwel=[(-1.0, 50.0)],
+        target_well_index=1,
+    )
+
+    multiwell, _ = build_multiwell_geometry(
+        15.0,
+        [(-1.0, 50.0)],
+        3,
+        target_well_index=1,
+        distance_scale=1.0 / coefficients.wvpt.well_radius_m,
+    )
+    expected_resistance = steady_multiwell_resistance_from_kd(
+        coefficients.wvpt.kD_model(index).to_numpy(dtype=float),
+        multiwell,
+        nput=3,
+        leakage_resistance_d=coefficients.wvpt.leakage_resistance_d,
+        well_radius_m=coefficients.wvpt.well_radius_m,
+    )
+
+    np.testing.assert_allclose(steady.to_numpy(), -(expected_resistance * flow_m3h))
+
+
+def test_wvpt_dp_steady_applies_temperature_correction():
+    index = pd.date_range("2020-01-01", periods=4, freq="D")
+    coefficients = _constant_resistance_coefficients(kd=100.0)
+    temp_wvp = pd.Series(20.0, index=index)
+    flow_m3h = np.full(index.size, 10.0)
+
+    kd = coefficients.wvpt.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float)
+    expected_resistance = steady_multiwell_resistance_from_kd(
+        kd,
+        [(1.0, 1.0)],
+        nput=1,
+        leakage_resistance_d=coefficients.wvpt.leakage_resistance_d,
+        well_radius_m=coefficients.wvpt.well_radius_m,
+    )
+
+    steady = coefficients.wvpt.dp_steady(
+        index,
+        flow_m3h,
+        nput=1,
+        dx_tussenputten=15.0,
+        r_mirrorwel=[],
+        temp_wvp=temp_wvp,
+    )
+
+    np.testing.assert_allclose(steady.to_numpy(), -(expected_resistance * flow_m3h))
+
+
+def test_wvpt_dp_steady_zero_flow_gives_zero():
+    index = pd.date_range("2020-01-01", periods=4, freq="D")
+    coefficients = _constant_resistance_coefficients(kd=100.0)
+
+    steady = coefficients.wvpt.dp_steady(
+        index,
+        np.zeros(index.size),
+        nput=1,
+        dx_tussenputten=15.0,
+        r_mirrorwel=[],
+    )
+
+    np.testing.assert_allclose(steady.to_numpy(), 0.0, rtol=0.0, atol=0.0)
+
+
 def test_wvpt_zero_flow_gives_zero_dp():
     index = pd.date_range("2020-01-01", periods=4, freq="D")
     coefficients = _constant_resistance_coefficients(kd=100.0)
