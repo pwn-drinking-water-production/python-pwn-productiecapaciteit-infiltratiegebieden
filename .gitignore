@@ -167,4 +167,12 @@ productiecapaciteit/reports/wvp_transient_example.py
 productiecapaciteit/reports/report_effect_putfilter.py
 productiecapaciteit/data/Plenty/**/*
 
+# AI review / working plan notes (not source)
+wvpt_review_findings.md
+wvpt_fix_plan.md
+wvpt_crosssection_plan.md
+
+# Generated PT10 low-flow output (written by investigate_pt10_offset_lowflow.py)
+productiecapaciteit/results/PT10offset_fromlowflow/PT10_corr_all.feather
+
 uv.lock
