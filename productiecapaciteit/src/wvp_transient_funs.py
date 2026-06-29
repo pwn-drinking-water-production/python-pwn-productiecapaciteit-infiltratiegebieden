@@ -27,6 +27,13 @@ _INV_4PI = 1.0 / (4.0 * np.pi)
 _KD_GRID_BLOCK_SPAN = 17.0
 _KD_GRID_MEMORY_DECAY = 22.0
 _KD_GRID_BAND_CAP = 1000
+# Safety caps for the kd_grid method. The far-grid resolution dk is tied to the smallest
+# cumulative-kD step, so a single very short interval can blow n_grid up; reject such
+# pathological grids with a clear error instead of silently allocating multi-GB arrays.
+# _KD_GRID_NEAR_MAX_ELEMENTS bounds the near-window row-block so peak memory does not scale
+# with nt * near_cells (which reaches nt * _KD_GRID_BAND_CAP in the very-leaky banded regime).
+_KD_GRID_MAX_NODES = 20_000_000
+_KD_GRID_NEAR_MAX_ELEMENTS = 4_000_000
 
 
 def _kd_antiderivative_well_function(kappa, alpha2):
@@ -56,7 +63,7 @@ def get_temp(index, mean, delta, time_offset, return_series=False):
     return temp_data.values
 
 
-def visc_ratio(temp, temp_ref=10.0):
+def visc_ratio(temp, temp_ref=12.0):
     visc_ref = (1 + 0.0155 * (temp_ref - 20.0)) ** -1.572  # / 1000  removed the division because we re taking a ratio.
     visc = (1 + 0.0155 * (temp - 20.0)) ** -1.572  # / 1000
     return visc / visc_ref
@@ -229,6 +236,199 @@ def build_multiwell_geometry(
     return multiwell, counts
 
 
+def _parse_image_specs(r_mirrorwel):
+    """Normalize boundary specs into a list of ``(multiplicity, boundary_distance_m)``."""
+    if r_mirrorwel is None:
+        return []
+    image_arr = np.asarray(r_mirrorwel, dtype=float)
+    if image_arr.size == 0:
+        return []
+    image_arr = np.atleast_2d(image_arr)
+    if image_arr.shape[1] != 2:
+        raise ValueError("r_mirrorwel must contain (multiplicity, boundary_distance_m) pairs")
+    if not np.isfinite(image_arr).all():
+        raise ValueError("r_mirrorwel contains NaN or infinite values")
+    return [(float(multi), float(distance)) for multi, distance in image_arr]
+
+
+def crosssection_observation_points(
+    nput,
+    dx_put,
+    distances,
+    *,
+    start="center",
+    orientation="perpendicular",
+):
+    """Observation-point coordinates for a drawdown cross-section.
+
+    The well row lies on the x-axis, well ``j`` at ``(j * dx_put, 0)``. A boundary
+    (``r_mirrorwel``) is a line parallel to the row on the ``+y`` side; the
+    cross-section is measured from the start well outward along one direction.
+
+    Parameters
+    ----------
+    nput : int
+        Number of real wells in the row.
+    dx_put : float
+        Spacing between neighboring wells, in meters.
+    distances : array_like
+        Nonnegative distances (m) from the start well at which to sample.
+    start : {"center", "end"}
+        Start the section at the center well or at the last (end) well.
+    orientation : {"perpendicular", "along"}
+        Direction of the section. ``"center"`` only allows ``"perpendicular"``
+        (running away from the row, toward the ``+y`` boundary side). At the end
+        well, ``"perpendicular"`` runs toward the boundary side and ``"along"``
+        runs outward along the row axis, away from the well field.
+
+    Returns
+    -------
+    (px, py, well_xs, start_index)
+        ``px``/``py`` are the observation coordinates (one per distance),
+        ``well_xs`` the real-well x positions, ``start_index`` the start well.
+    """
+    dx_put = float(dx_put)
+    if not np.isfinite(dx_put) or dx_put <= 0.0:
+        raise ValueError(f"dx_put must be positive, got {dx_put}")
+
+    nput_float = float(nput)
+    if not np.isfinite(nput_float):
+        raise ValueError(f"nput must be finite, got {nput}")
+    nput_int = int(round(nput_float))
+    if nput_int < 1 or not np.isclose(nput_float, nput_int):
+        raise ValueError(f"nput must be a positive integer, got {nput}")
+
+    distances = as_float_array("distances", distances)
+    if np.any(distances < 0.0):
+        raise ValueError("cross-section distances must be nonnegative")
+
+    well_xs = np.arange(nput_int, dtype=float) * dx_put
+
+    if start == "center":
+        if orientation != "perpendicular":
+            raise ValueError("center cross-section must be perpendicular to the well row")
+        start_index = nput_int // 2
+        px = np.full(distances.shape, well_xs[start_index])
+        py = distances.copy()
+    elif start == "end":
+        start_index = nput_int - 1
+        if orientation == "perpendicular":
+            px = np.full(distances.shape, well_xs[start_index])
+            py = distances.copy()
+        elif orientation == "along":
+            px = well_xs[start_index] + distances
+            py = np.zeros_like(distances)
+        else:
+            raise ValueError("end cross-section orientation must be 'perpendicular' or 'along'")
+    else:
+        raise ValueError("start must be 'center' or 'end'")
+
+    return px, py, well_xs, start_index
+
+
+def crosssection_image_offsets(r_mirrorwel, boundary_perp_offsets=None):
+    """Resolve boundary specs into signed perpendicular canal offsets for a cross-section.
+
+    ``r_mirrorwel`` stores only ``(multiplicity, distance)`` and discards which *side* of
+    the well row each boundary sits on. That is lossless on the well axis (where
+    ``dp_model``/``dp_steady`` live and the ``+b`` / ``-b`` images are equidistant) but a
+    perpendicular cross-section samples off-axis, where the side matters. This resolves the
+    side from the multiplicity:
+
+    - ``(mult, b)`` with ``|mult| == 1`` -> a single canal; only allowed when it is the
+      sole boundary, placed on ``+b`` (the section runs toward it).
+    - ``(mult, b)`` with ``|mult| == 2`` -> two opposite-side canals at ``+b`` and ``-b``,
+      each of strength ``sign(mult)`` (the dune-infiltration "wells between two panden"
+      layout that the collapsed ``(-2, b)`` config entries encode).
+    - anything else (mixed distances such as ``[(-1, 250), (-1, 82)]``, or ``|mult| > 2``)
+      -> the side is ambiguous; raise ``NotImplementedError`` asking for explicit
+      ``boundary_perp_offsets``.
+
+    ``boundary_perp_offsets``, when given, is a list of ``(strength, signed_offset_m)``
+    used directly (overriding ``r_mirrorwel``), so asymmetric strangen and "run away from
+    the canal" sections stay expressible. The image well of a real well sits at
+    ``y = 2 * signed_offset_m``.
+
+    Returns a list of ``(strength, signed_offset_m)`` boundary-line offsets.
+    """
+    if boundary_perp_offsets is not None:
+        offsets = []
+        for strength, signed_offset in boundary_perp_offsets:
+            strength = float(strength)
+            signed_offset = float(signed_offset)
+            if not np.isfinite([strength, signed_offset]).all():
+                raise ValueError("boundary_perp_offsets contains NaN or infinite values")
+            if signed_offset == 0.0:
+                raise ValueError("boundary_perp_offsets entries must have a nonzero offset")
+            offsets.append((strength, signed_offset))
+        return offsets
+
+    specs = _parse_image_specs(r_mirrorwel)
+    offsets = []
+    single_count = 0
+    for multi, boundary in specs:
+        if boundary <= 0.0:
+            raise ValueError(f"Mirror-well boundary distance must be positive, got {boundary}")
+        magnitude = int(round(abs(multi)))
+        if not np.isclose(abs(multi), magnitude) or magnitude == 0:
+            raise NotImplementedError(
+                f"cross-section cannot infer canal sides for multiplicity {multi}; "
+                "pass boundary_perp_offsets=[(strength, signed_offset_m), ...] explicitly"
+            )
+        sign = 1.0 if multi > 0 else -1.0
+        if magnitude == 1:
+            single_count += 1
+            offsets.append((sign, boundary))
+        elif magnitude == 2:
+            offsets.append((sign, boundary))
+            offsets.append((sign, -boundary))
+        else:
+            raise NotImplementedError(
+                f"cross-section cannot infer canal sides for multiplicity {multi}; "
+                "pass boundary_perp_offsets=[(strength, signed_offset_m), ...] explicitly"
+            )
+
+    # A lone single-sided canal runs the section toward it; a single-sided canal that
+    # coexists with any other boundary has an unknown side and must be made explicit.
+    if single_count and len(specs) > 1:
+        raise NotImplementedError(
+            f"cross-section cannot infer canal sides for r_mirrorwel={r_mirrorwel!r}; "
+            "pass boundary_perp_offsets=[(strength, signed_offset_m), ...] explicitly"
+        )
+    return offsets
+
+
+def build_crosssection_multiwell(px, py, well_xs, image_offsets, well_radius_m):
+    """Multiwell terms for the drawdown at a single observation point ``(px, py)``.
+
+    Returns ``(multiplicity, distance / well_radius)`` terms for every real well (on the
+    row at ``y = 0``) and every image well (one per resolved boundary offset, placed at
+    ``y = 2 * signed_offset``). ``image_offsets`` is the resolved
+    ``(strength, signed_offset_m)`` list from :func:`crosssection_image_offsets`. Distances
+    are clipped at one well radius so a point coinciding with a well reproduces that well's
+    own drawdown rather than a singularity. On the well axis (``py == 0``) the ``+b`` /
+    ``-b`` images are equidistant, so the output matches :func:`build_multiwell_geometry`
+    and feeds the same ``objective``/``steady`` machinery.
+    """
+    well_xs = np.asarray(well_xs, dtype=float)
+    well_radius_m = float(well_radius_m)
+    if not np.isfinite(well_radius_m) or well_radius_m <= 0.0:
+        raise ValueError(f"well_radius_m must be positive, got {well_radius_m}")
+    scale = 1.0 / well_radius_m
+
+    multiwell = []
+    real_distances = np.hypot(px - well_xs, py)
+    for distance in real_distances:
+        multiwell.append((1.0, max(float(distance), well_radius_m) * scale))
+
+    for strength, signed_offset in image_offsets:
+        image_distances = np.hypot(px - well_xs, py - 2.0 * float(signed_offset))
+        for distance in image_distances:
+            multiwell.append((float(strength), max(float(distance), well_radius_m) * scale))
+
+    return multiwell
+
+
 def steady_multiwell_resistance_from_kd(
     kD,
     multiwell,
@@ -238,9 +438,10 @@ def steady_multiwell_resistance_from_kd(
 ):
     """Return steady drawdown coefficient for a total flow input in m3/h.
 
-    The coefficient includes conversion from total row flow in m3/h to per-well
-    flow in m3/d, so multiplying the return value by total m3/h gives meters of
-    drawdown at the target well.
+    Units: the returned coefficient has dimension meters per (m3/h). It already folds
+    in the ``24 / nput`` conversion from total row flow in m3/h to per-well flow in
+    m3/d (the De Glee well function is evaluated per well, then driven by the per-well
+    rate), so ``coefficient * total_flow_m3h`` is meters of drawdown at the target well.
     """
     kD = np.asarray(kD, dtype=float)
     leakage_resistance_d = float(leakage_resistance_d)
@@ -454,7 +655,7 @@ def objective(args, return_result=False, **pextra):
 
 def get_perr(res):
     if np.any(res.active_mask):
-        print(f"{res.active_mask} True for params at bounds")
+        logger.warning("%s True for params at bounds", res.active_mask)
     U, s, Vh = linalg.svd(res.jac, full_matrices=False)
     tol = np.finfo(float).eps * s[0] * max(res.jac.shape)
     w = s > tol
@@ -468,7 +669,7 @@ def get_perr(res):
     for xi, perr_ri in zip(res.x, perr_rel, strict=False):
         sl.append(f"{xi} +/- {perr_ri * 100:.1f}%")
 
-    print("\n".join(sl))
+    logger.info("%s", "\n".join(sl))
     return perr
 
 
@@ -752,6 +953,35 @@ def _variable_kd_rate_drawdown_gauss(
     return drawdown
 
 
+def _kd_grid_regime(beta, time_days, cumulative_kd, n_per_step):
+    """Classify which kd_grid regime the inputs select and return the grid sizing.
+
+    Returns ``(regime, dk, n_grid, mem_cells)`` where ``regime`` is one of
+    ``"long_memory"``, ``"blocked"`` or ``"banded"``, ``dk`` is the uniform
+    cumulative-kD grid step, ``n_grid`` the node count and ``mem_cells`` the leakage
+    memory length in cells. This is the single source of truth for the regime decision,
+    so tests can assert which path runs without re-deriving the thresholds.
+    """
+    beta2 = float(beta) * float(beta)
+    span = float(time_days[-1] - time_days[0])
+    kappa_max = float(cumulative_kd[-1])
+    min_step = float(np.diff(cumulative_kd).min())
+    if not np.isfinite(min_step) or min_step <= 0.0:
+        raise ValueError("cumulative_kd must be strictly increasing for the kd_grid method")
+    dk = min_step / float(n_per_step)
+    n_grid = int(np.ceil(kappa_max / dk)) + 1
+    kd_max = float(np.max(np.diff(cumulative_kd) / np.diff(time_days)))
+    if beta2 == 0.0:
+        mem_cells = n_grid
+    else:
+        mem_cells = int(np.ceil(kd_max * _KD_GRID_MEMORY_DECAY / (beta2 * dk)))
+    mem_cells = max(1, mem_cells)
+    long_memory = beta2 == 0.0 or beta2 * span <= _KD_GRID_BLOCK_SPAN
+    banded = (not long_memory) and mem_cells <= _KD_GRID_BAND_CAP
+    regime = "long_memory" if long_memory else ("banded" if banded else "blocked")
+    return regime, dk, n_grid, mem_cells
+
+
 def _variable_kd_rate_drawdown_kd_grid(
     alpha2_terms,
     beta,
@@ -789,12 +1019,14 @@ def _variable_kd_rate_drawdown_kd_grid(
     t_last = time_days[-1]
 
     kappa_nodes = cumulative_kd
-    kappa_max = float(kappa_nodes[-1])
-    min_step = float(np.diff(kappa_nodes).min())
-    if not np.isfinite(min_step) or min_step <= 0.0:
-        raise ValueError("cumulative_kd must be strictly increasing for the kd_grid method")
-    dk = min_step / float(n_per_step)
-    n_grid = int(np.ceil(kappa_max / dk)) + 1
+    # Regime, grid step, node count and leakage-memory length (single source of truth).
+    regime, dk, n_grid, mem_cells = _kd_grid_regime(beta, time_days, kappa_nodes, n_per_step)
+    if n_grid > _KD_GRID_MAX_NODES:
+        raise ValueError(
+            f"kd_grid would allocate {n_grid} grid nodes (cap {_KD_GRID_MAX_NODES}). The grid step is "
+            "set by the smallest cumulative-kD interval, so a single very short time step forces a huge "
+            "grid; resample to a more regular index before calling the kd_grid method."
+        )
     node = np.arange(n_grid) * dk
 
     # Source density q / kD per grid cell [m*dk, (m+1)*dk], sampled at the midpoint.
@@ -805,22 +1037,16 @@ def _variable_kd_rate_drawdown_kd_grid(
 
     span = t_last - t0
     near_base = int(near_steps) * int(n_per_step)
-
-    # Memory window: number of kappa cells over which the leakage decay exp(-beta^2 dt)
-    # stays non-negligible. Beyond it the far kernel is truncated / the source is dropped.
-    kd_max = float(np.max(np.diff(cumulative_kd) / np.diff(time_days)))
-    if beta2 == 0.0:
-        mem_cells = n_grid
-    else:
-        mem_cells = int(np.ceil(kd_max * _KD_GRID_MEMORY_DECAY / (beta2 * dk)))
-    mem_cells = max(1, mem_cells)
-
-    long_memory = beta2 == 0.0 or beta2 * span <= _KD_GRID_BLOCK_SPAN
-    banded = (not long_memory) and mem_cells <= _KD_GRID_BAND_CAP
+    long_memory = regime == "long_memory"
+    banded = regime == "banded"
 
     if banded:
         # Very leaky aquifer: memory is a handful of cells. Cover the whole memory with
         # the exact direct near window below and skip the grid convolution entirely.
+        # Accuracy note: the near window factors the leakage decay at each cell midpoint,
+        # so the banded path is first-order in dk (~O(1/n_per_step)). At the default
+        # n_per_step=8 the error grows as the aquifer gets very leaky (~1% near c=10 d,
+        # larger toward the c=1 d bound); raise n_per_step if a leaky strang needs it.
         near_cells = min(n_grid - 1, max(near_base, mem_cells))
     else:
         near_cells = near_base
@@ -905,35 +1131,43 @@ def _variable_kd_rate_drawdown_kd_grid(
     # the per-term well function differs, so it is summed with the term multiplicities.
     near = np.zeros(nt)
     if near_term_mask.any():
-        top_node = np.floor(kappa_nodes / dk).astype(np.int64)
+        near_alpha2_terms = alpha2_terms[near_term_mask]
         near_lags = np.arange(near_cells + 1)
-        cell = top_node[:, None] - near_lags[None, :]
-        # There are n_grid - 1 cells (indices 0 .. n_grid - 2). When K_i lands on the
-        # top node, top_node can equal n_grid - 1, whose cell is out of range; mark it
-        # invalid instead of clipping it onto a real cell (which would double-count).
-        valid = (cell >= 0) & (cell <= n_grid - 2)
-        cell_clipped = np.clip(cell, 0, n_grid - 2)
-        cell_lo = cell_clipped * dk
-        cell_hi = (cell_clipped + 1) * dk
-        kappa_target = kappa_nodes[:, None]
-        seg_lo = np.maximum(cell_lo, kappa_target - w_near)
-        seg_hi = np.minimum(cell_hi, kappa_target)
-        has_segment = seg_hi > seg_lo
-        arg_lo = kappa_target - seg_lo
-        arg_hi = kappa_target - seg_hi
-        d_well = np.zeros_like(arg_lo)
-        for mult, alpha2 in alpha2_terms[near_term_mask]:
-            d_well += mult * (
-                _kd_antiderivative_well_function(arg_lo, alpha2)
-                - _kd_antiderivative_well_function(arg_hi, alpha2)
-            )
-        seg_mid = (0.5 * (seg_lo + seg_hi)).ravel()
-        t_seg = np.interp(seg_mid, kappa_nodes, time_days)
-        j_seg = np.clip(np.searchsorted(time_days, t_seg, side="right") - 1, 0, nt - 2)
-        rho_seg = (q_interval[j_seg] / kd_fun(np.clip(t_seg, t0, t_last))).reshape(cell.shape)
-        t_seg = t_seg.reshape(cell.shape)
-        contribution = rho_seg * np.exp(-beta2 * (time_days[:, None] - t_seg)) * d_well
-        near = np.where(valid & has_segment, contribution, 0.0).sum(axis=1)
+        # Process target nodes in row-blocks so peak memory stays bounded: the
+        # (block, near_cells + 1) arrays below would otherwise scale with nt * near_cells,
+        # which reaches nt * _KD_GRID_BAND_CAP in the banded regime. Each row is independent,
+        # so blocking is exact.
+        block_rows = max(1, _KD_GRID_NEAR_MAX_ELEMENTS // (near_cells + 1))
+        for lo in range(0, nt, block_rows):
+            hi = min(lo + block_rows, nt)
+            kappa_target = kappa_nodes[lo:hi, None]
+            top_node = np.floor(kappa_nodes[lo:hi] / dk).astype(np.int64)
+            cell = top_node[:, None] - near_lags[None, :]
+            # There are n_grid - 1 cells (indices 0 .. n_grid - 2). When K_i lands on the
+            # top node, top_node can equal n_grid - 1, whose cell is out of range; mark it
+            # invalid instead of clipping it onto a real cell (which would double-count).
+            valid = (cell >= 0) & (cell <= n_grid - 2)
+            cell_clipped = np.clip(cell, 0, n_grid - 2)
+            cell_lo = cell_clipped * dk
+            cell_hi = (cell_clipped + 1) * dk
+            seg_lo = np.maximum(cell_lo, kappa_target - w_near)
+            seg_hi = np.minimum(cell_hi, kappa_target)
+            has_segment = seg_hi > seg_lo
+            arg_lo = kappa_target - seg_lo
+            arg_hi = kappa_target - seg_hi
+            d_well = np.zeros_like(arg_lo)
+            for mult, alpha2 in near_alpha2_terms:
+                d_well += mult * (
+                    _kd_antiderivative_well_function(arg_lo, alpha2)
+                    - _kd_antiderivative_well_function(arg_hi, alpha2)
+                )
+            seg_mid = (0.5 * (seg_lo + seg_hi)).ravel()
+            t_seg = np.interp(seg_mid, kappa_nodes, time_days)
+            j_seg = np.clip(np.searchsorted(time_days, t_seg, side="right") - 1, 0, nt - 2)
+            rho_seg = (q_interval[j_seg] / kd_fun(np.clip(t_seg, t0, t_last))).reshape(cell.shape)
+            t_seg = t_seg.reshape(cell.shape)
+            contribution = rho_seg * np.exp(-beta2 * (time_days[lo:hi, None] - t_seg)) * d_well
+            near[lo:hi] = np.where(valid & has_segment, contribution, 0.0).sum(axis=1)
 
     drawdown = near + far
     drawdown[0] = 0.0
@@ -979,24 +1213,3 @@ def _variable_kd_initial_drawdown(
         out[target_idx] = initial_q * np.exp(-beta2 * target_lag) / (4.0 * np.pi * kD0) * integral
 
     return out
-
-
-# def rain_exp(index, rainfall, rain_gain, rain_time_scale, **pextra):
-#     dP = np.diff(rainfall, prepend=0.0)
-#     tmax = pd.Timedelta(-rain_time_scale * np.log(1 - pextra["frac_step_max), unit="D")
-#     nt_max = tmax / pd.Timedelta(pextra["dt_lower"], unit="D")
-#     nt = index.size
-#     # nt_max = min(nt_max, nt)
-#
-#     it_arr = np.arange(nt_max)[None, :] + np.arange(nt)[:, None]
-#     exclude = it_arr > (nt - 1)
-#     it_arr[exclude] = nt - 1
-#     # time_arr = (index[it_arr] - index[:, None]) / pd.Timedelta(1.0, unit="D")
-
-
-def exp_impulse(time, time_scale):
-    return np.exp(-time / time_scale)
-
-
-def exp_step(time, time_scale):
-    return -np.exp(-time / time_scale) + 1

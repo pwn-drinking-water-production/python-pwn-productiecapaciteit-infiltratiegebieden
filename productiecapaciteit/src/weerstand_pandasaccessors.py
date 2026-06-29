@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 
 from productiecapaciteit.src.wvp_transient_funs import (
+    as_float_array,
+    build_crosssection_multiwell,
     build_multiwell_geometry,
+    crosssection_image_offsets,
+    crosssection_observation_points,
     infer_lower_timestep,
     objective,
     steady_multiwell_resistance_from_kd,
@@ -362,7 +366,7 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
     )
 
     @staticmethod
-    def _validate(obj):
+    def _validate(obj):  # noqa: C901
         req_keys = (
             WvpTransientResistanceAccessor.REFERENCE_TRANSMISSIVITY_KEYS
             + WvpTransientResistanceAccessor.TEMPERATURE_KEYS
@@ -383,6 +387,12 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         )
         if not np.isfinite(values).all():
             raise ValueError("Transient WVP coefficients must be finite")
+        try:
+            kd_ref_datum = pd.Timestamp(obj["kD_ref_datum"])
+        except (ValueError, TypeError) as exc:
+            raise ValueError("kD_ref_datum must be a valid date") from exc
+        if pd.isna(kd_ref_datum):
+            raise ValueError("kD_ref_datum must be a valid (non-NaT) date")
         temperature_values = np.array(
             [
                 obj["temperature_mean_degC"],
@@ -437,7 +447,7 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
 
     @property
     def temp_mean(self):
-        return self._obj["temperature_mean_degC"]
+        return float(self._obj["temperature_mean_degC"])
 
     @property
     def temp_min(self):
@@ -449,15 +459,15 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
 
     @property
     def temp_delta(self):
-        return self._obj["temperature_delta_degC"]
+        return float(self._obj["temperature_delta_degC"])
 
     @property
     def temp_ref(self):
-        return self._obj["temperature_ref_degC"]
+        return float(self._obj["temperature_ref_degC"])
 
     @property
     def time_offset(self):
-        return self._obj["temperature_time_offset_d"]
+        return float(self._obj["temperature_time_offset_d"])
 
     @property
     def method(self):
@@ -475,6 +485,12 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
     def _as_1d_float_array(name, values, index):
         index = pd.DatetimeIndex(index)
         if isinstance(values, pd.Series):
+            missing = index.difference(values.index)
+            if len(missing) > 0:
+                raise ValueError(
+                    f"{name} Series is missing values for {len(missing)} of {index.size} requested "
+                    f"timestamps; its index must align with the model index (first missing: {missing[0]})"
+                )
             arr = values.reindex(index).to_numpy(dtype=float)
         else:
             arr = np.asarray(values, dtype=float)
@@ -541,9 +557,11 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
             raise ValueError("Calibrated kD must be finite and positive")
         return pd.Series(data=kd, index=index, name="wvpt_model_kD")
 
-    # The steady instantaneous-resistance helpers inherited from WvpResistanceAccessor
-    # are meaningless for a transient model: resistance depends on the full flow history,
-    # not a single timestamp. Reject them so callers reach for dp_model instead.
+    # The steady instantaneous-resistance helpers are meaningless for a transient model:
+    # resistance depends on the full flow history, not a single timestamp. a_model and
+    # a_model_reftemp override inherited WvpResistanceAccessor methods; resistance_model and
+    # resistance_model_reftemp are forward-compatible guards (the parent does not define them).
+    # All reject so callers reach for dp_model instead.
     @staticmethod
     def _transient_not_implemented(name):
         msg = f"WVPT is transient; {name} has no instantaneous form. Use dp_model(...) for transient drawdown."
@@ -580,6 +598,7 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         n_per_step=8,
         near_steps=3,
         hantush_method="variable_kd",
+        flow_label="left",
     ):
         index = pd.DatetimeIndex(index)
         flow = self._as_1d_float_array("flow", flow, index)
@@ -593,14 +612,63 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         if nput <= 0.0:
             raise ValueError(f"nput must be positive, got {nput}")
 
+        drawdown = self._transient_drawdown_for_multiwell(
+            index,
+            flow / nput * 24.0,
+            self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float),
+            multiwell,
+            multiwell_counts=multiwell_counts,
+            initial_condition=initial_condition,
+            frac_step_max=frac_step_max,
+            tmax_days_cap=tmax_days_cap,
+            max_workers=max_workers,
+            integration_method=integration_method,
+            n_gauss=n_gauss,
+            max_gauss_step_days=max_gauss_step_days,
+            n_per_step=n_per_step,
+            near_steps=near_steps,
+            hantush_method=hantush_method,
+            flow_label=flow_label,
+        )
+        if not np.isfinite(drawdown).all():
+            raise ValueError("Transient WVP drawdown contains NaN or infinite values")
+        return pd.Series(data=-drawdown, index=index, name="wvpt_model_dp")
+
+    def _transient_drawdown_for_multiwell(
+        self,
+        index,
+        q_per_well,
+        kd,
+        multiwell,
+        *,
+        multiwell_counts=None,
+        initial_condition="steady",
+        frac_step_max=0.95,
+        tmax_days_cap=None,
+        max_workers=None,
+        integration_method="kd_grid",
+        n_gauss=32,
+        max_gauss_step_days=0.5,
+        n_per_step=8,
+        near_steps=3,
+        hantush_method="variable_kd",
+        flow_label="left",
+    ):
+        """Transient rate-part drawdown for one precomputed multiwell geometry.
+
+        Shared by :meth:`dp_model` (geometry from a target well) and
+        :meth:`dp_model_crosssection` (geometry from an off-well observation point).
+        ``q_per_well`` is per-well flow in m3/d and ``kd`` the temperature-corrected
+        kD, both already evaluated on ``index``. Returns drawdown as positive meters.
+        """
         pextra = {
             "index": index,
-            "Q_obs": flow / nput * 24.0,
-            "kD": self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float),
+            "Q_obs": q_per_well,
+            "kD": kd,
             "dt_lower": infer_lower_timestep(index),
             "multiwell_contains_r_self": True,
             "multiwell": multiwell,
-            "multiwell_counts": multiwell_counts,
+            "multiwell_counts": multiwell_counts or {},
             "frac_step_max": frac_step_max,
             "initial_condition": initial_condition,
             "tmax_days_cap": tmax_days_cap,
@@ -611,11 +679,9 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
             "n_per_step": n_per_step,
             "near_steps": near_steps,
             "hantush_method": hantush_method,
+            "flow_label": flow_label,
         }
-        drawdown = objective([self.alpha, self.beta], return_result=True, **pextra)
-        if not np.isfinite(drawdown).all():
-            raise ValueError("Transient WVP drawdown contains NaN or infinite values")
-        return pd.Series(data=-drawdown, index=index, name="wvpt_model_dp")
+        return objective([self.alpha, self.beta], return_result=True, **pextra)
 
     def dp_steady(
         self,
@@ -660,6 +726,157 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         if not np.isfinite(drawdown).all():
             raise ValueError("Steady WVP drawdown contains NaN or infinite values")
         return pd.Series(data=-drawdown, index=index, name="wvpt_model_dp_steady")
+
+    @staticmethod
+    def _crosssection_columns(distances):
+        return pd.Index(distances, name="distance_m")
+
+    def dp_model_crosssection(
+        self,
+        index,
+        flow,
+        nput,
+        dx_tussenputten,
+        r_mirrorwel,
+        distances,
+        start="center",
+        orientation="perpendicular",
+        temp_wvp=None,
+        boundary_perp_offsets=None,
+        initial_condition="steady",
+        frac_step_max=0.95,
+        tmax_days_cap=None,
+        max_workers=None,
+        integration_method="kd_grid",
+        n_gauss=32,
+        max_gauss_step_days=0.5,
+        n_per_step=8,
+        near_steps=3,
+        hantush_method="variable_kd",
+        flow_label="left",
+    ):
+        """Transient drawdown along a cross-section, as a time x distance field.
+
+        Evaluates :meth:`dp_model`'s forward model at observation points laid out
+        from the ``start`` well (``"center"`` or ``"end"``) along ``orientation``
+        (see :func:`crosssection_observation_points`), one point per entry in
+        ``distances`` (meters from the start well). The returned DataFrame is indexed
+        by ``index`` with one column per distance (``distance_m``); ``distance == 0``
+        reproduces the at-well :meth:`dp_model`. Drawdown is negative meters, matching
+        :meth:`dp_model`.
+
+        The perpendicular section needs each boundary's side, which ``r_mirrorwel`` does
+        not encode; it is resolved by :func:`crosssection_image_offsets` (``(-2, b)`` ->
+        two canals at ``+-b``). For asymmetric boundaries pass
+        ``boundary_perp_offsets=[(strength, signed_offset_m), ...]`` to set the sides
+        explicitly.
+
+        Caveat (image method): beyond the nearest constant-head canal the single-image
+        superposition flips sign (spurious mounding). For a single canal at ``b`` the
+        zero-crossing is exactly at ``b``; for a two-sided ``(-2, b)`` boundary the
+        single-image-pair approximation pushes the onset inward to roughly ``0.6-0.8 * b``
+        (worse for large ``sqrt(kD * c) / b``), so keep two-sided perpendicular sections to
+        distances below about ``0.6 * b``.
+        """
+        index = pd.DatetimeIndex(index)
+        flow = self._as_1d_float_array("flow", flow, index)
+        distances = as_float_array("distances", distances)
+        nput_f = float(nput)
+        if nput_f <= 0.0:
+            raise ValueError(f"nput must be positive, got {nput}")
+
+        px, py, well_xs, _start_index = crosssection_observation_points(
+            nput, dx_tussenputten, distances, start=start, orientation=orientation
+        )
+        image_offsets = crosssection_image_offsets(r_mirrorwel, boundary_perp_offsets)
+        kd = self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float)
+        q_per_well = flow / nput_f * 24.0
+
+        data = np.empty((index.size, distances.size), dtype=float)
+        for k in range(distances.size):
+            multiwell = build_crosssection_multiwell(
+                px[k], py[k], well_xs, image_offsets, self.well_radius_m
+            )
+            drawdown = self._transient_drawdown_for_multiwell(
+                index,
+                q_per_well,
+                kd,
+                multiwell,
+                initial_condition=initial_condition,
+                frac_step_max=frac_step_max,
+                tmax_days_cap=tmax_days_cap,
+                max_workers=max_workers,
+                integration_method=integration_method,
+                n_gauss=n_gauss,
+                max_gauss_step_days=max_gauss_step_days,
+                n_per_step=n_per_step,
+                near_steps=near_steps,
+                hantush_method=hantush_method,
+                flow_label=flow_label,
+            )
+            if not np.isfinite(drawdown).all():
+                raise ValueError("Transient WVP cross-section drawdown contains NaN or infinite values")
+            data[:, k] = -drawdown
+
+        return pd.DataFrame(data, index=index, columns=self._crosssection_columns(distances))
+
+    def dp_steady_crosssection(
+        self,
+        index,
+        flow,
+        nput,
+        dx_tussenputten,
+        r_mirrorwel,
+        distances,
+        start="center",
+        orientation="perpendicular",
+        temp_wvp=None,
+        boundary_perp_offsets=None,
+    ):
+        """Steady-state drawdown along a cross-section, as a time x distance field.
+
+        The ``t -> infinity`` companion to :meth:`dp_model_crosssection`: the De Glee /
+        Hantush-Jacob drawdown each ``flow`` value would cause if sustained, evaluated
+        at the same observation points (see :func:`crosssection_observation_points`).
+        Returns a DataFrame indexed by ``index`` with one ``distance_m`` column per
+        distance; ``distance == 0`` reproduces :meth:`dp_steady`. Drawdown is negative
+        meters, matching :meth:`dp_steady`.
+
+        Boundary sides are resolved by :func:`crosssection_image_offsets`; pass
+        ``boundary_perp_offsets`` for asymmetric strangen (see
+        :meth:`dp_model_crosssection`).
+        """
+        index = pd.DatetimeIndex(index)
+        flow = self._as_1d_float_array("flow", flow, index)
+        distances = as_float_array("distances", distances)
+        nput_f = float(nput)
+        if nput_f <= 0.0:
+            raise ValueError(f"nput must be positive, got {nput}")
+
+        px, py, well_xs, _start_index = crosssection_observation_points(
+            nput, dx_tussenputten, distances, start=start, orientation=orientation
+        )
+        image_offsets = crosssection_image_offsets(r_mirrorwel, boundary_perp_offsets)
+        kd = self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float)
+
+        data = np.empty((index.size, distances.size), dtype=float)
+        for k in range(distances.size):
+            multiwell = build_crosssection_multiwell(
+                px[k], py[k], well_xs, image_offsets, self.well_radius_m
+            )
+            steady_resistance = steady_multiwell_resistance_from_kd(
+                kd,
+                multiwell,
+                nput_f,
+                self.leakage_resistance_d,
+                self.well_radius_m,
+            )
+            drawdown = steady_resistance * flow
+            if not np.isfinite(drawdown).all():
+                raise ValueError("Steady WVP cross-section drawdown contains NaN or infinite values")
+            data[:, k] = -drawdown
+
+        return pd.DataFrame(data, index=index, columns=self._crosssection_columns(distances))
 
 
 @pd.api.extensions.register_dataframe_accessor("leiding")
