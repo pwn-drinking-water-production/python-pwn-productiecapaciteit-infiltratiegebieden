@@ -270,12 +270,14 @@ def get_config(fn="strang_props7.csv"):
         "Hydraulische diameter:": float,
         "Lengte (in meters):": float,
         "dx_tussenputten": float,
-        "dx_mirrorwell": object,
+        "r_mirrorwel": object,
     }
     fp = data_dir / fn
     out = pd.read_csv(fp, index_col=0, sep=";").T
+    if "dx_mirrorwell" in out.columns and "r_mirrorwel" not in out.columns:
+        out = out.rename(columns={"dx_mirrorwell": "r_mirrorwel"})
     out = out.astype(dtypes)
-    out["dx_mirrorwell"] = out["dx_mirrorwell"].apply(pd.eval)
+    out["r_mirrorwel"] = out["r_mirrorwel"].apply(pd.eval)
     return out
 
 

@@ -16,8 +16,6 @@ leidingweerstand_fp = results_dir / "Leidingweerstand" / "Leidingweerstand_model
 wvpweerstand_fp = results_dir / "Wvpweerstand" / "Wvpweerstand_modelcoefficienten.xlsx"
 
 
-
-
 index = pd.date_range("2012-05-01", "2026-12-31")
 date_clean = pd.Timestamp("2025-10-01")
 date_goal = pd.Timestamp("2025-12-01")

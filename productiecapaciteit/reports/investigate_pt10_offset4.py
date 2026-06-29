@@ -136,7 +136,7 @@ def analyse_a_leiding(
     else:
         idrop = np.argmax(df_a.leiding.a_effect[1:]) + 1
         removed = werkzh_datums.pop(idrop)
-        logging.info(f"=> Dropping: {removed}. Remaining dates: {werkzh_datums}")
+        logging.info("=> Dropping: %s. Remaining dates: %s", removed, werkzh_datums)
 
         df_a = analyse_a_leiding(df_dP, df_Q, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 

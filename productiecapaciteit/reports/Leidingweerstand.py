@@ -133,7 +133,7 @@ def analyse_a_leiding(
     else:
         idrop = np.argmax(df_a.leiding.a_effect[1:]) + 1
         removed = werkzh_datums.pop(idrop)
-        logging.info(f"=> Dropping: {removed}. Remaining dates: {werkzh_datums}")
+        logging.info("=> Dropping: %s. Remaining dates: %s", removed, werkzh_datums)
 
         df_a = analyse_a_leiding(df_dP, df_Q, werkzh_datums, Q_avg, t_projectie=t_projectie, slope=slope)
 
@@ -280,7 +280,7 @@ for strang, c in config.iterrows():
 
     fig_path = os.path.join(res_folder, f"Leidingweerstandcoefficient - {strang}.png")
     fig.savefig(fig_path, dpi=300)
-    logging.info(f"Saved result to {fig_path}")
+    logging.info("Saved result to %s", fig_path)
 
     if 0:
         res, d2 = get_leiding_slope(df.dP, df.Q, df_a.datum, slope_val=c.leiding_a_slope, fit_pt10=True)

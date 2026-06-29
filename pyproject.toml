@@ -15,16 +15,18 @@ authors = [
 maintainers = [
     { name = "B.F. des Tombe", email = "bas.des.tombe@pwn.nl" },
 ]
-requires-python = ">= 3.8"
+requires-python = ">= 3.10"
 dependencies = [
     "pandas",
     "pyarrow",
+    "scipy",
     "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git",
     "unhcrpyplotstyle @ git+https://github.com/leichen88/unhcrpyplotstyle.git",
     "pandas-stubs>=2.0.2.230605",
     "openpyxl",
     "ruff==0.15.6",
 ]
+
 keywords = ["hydrology", "groundwater", "modeling", "Modflow 6", "flopy"]
 classifiers = [
     'Development Status :: 4 - Beta',
@@ -32,10 +34,16 @@ classifiers = [
     'Intended Audience :: Other Audience',
     'License :: OSI Approved :: MIT License',
     'Programming Language :: Python :: 3 :: Only',
-    'Programming Language :: Python :: 3.8',
-    'Programming Language :: Python :: 3.9',
     'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
     'Topic :: Scientific/Engineering :: Hydrology',
+]
+
+[project.optional-dependencies]
+test = [
+    "pastas",
+    "pytest",
 ]
 
 [project.urls]

@@ -46,9 +46,7 @@ for strang, c in config.iterrows():
 
     weerstand = strangWeerstand(df_a_leiding, df_a_filter, df_a_wvp, **c.to_dict())
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw=gridspec_kw)
-    fig.suptitle(
-        f"{strang}: Capaciteit met geplande schoonmaak putten en leiding op {date_clean.strftime('%d-%m-%Y')}"
-    )
+    fig.suptitle(f"{strang}: Capaciteit met geplande schoonmaak putten en leiding op {date_clean.strftime('%d-%m-%Y')}")
 
     weerstand.plot_lims(index, date_clean, ax=ax0)
     weerstand.plot_capaciteit_effect_schoonmaak(date_clean, index, date_goal, ax=ax1)

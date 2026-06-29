@@ -3,9 +3,21 @@ Productiecapaciteit van infiltratiegebieden ICAS en IKIEF
 
 # Install instructions
 Via de github desktop applicatie clone deze repository naar een folder op je computer:
+
+- https://github.com/pwn-drinking-water-production/python-pwn-productiecapaciteit-infiltratiegebieden
+- C:\PythonScripts\Repositories\pwn-drinking-water-production\python-pwn-productiecapaciteit-infiltratiegebieden
+
+Navigeer naar de gecloonde repository en maak het environment aan met:
 ```
-GitHub desktop applicatie > File > Clone repository... en selecteer bdestombe/python-pwn-productiecapaciteit-infiltratiegebieden en een local path
+uv venv --python=3.14
 ```
+Activeer het environment en installeer de `productiecapaciteit`package met:
+```
+.venv\Scripts\activate
+uv pip install -e .
+```
+Je Python kernel staat nu in `.venv\Scripts\python.exe`
+
 
 # Werkprotocol
  - Bereid de data voor. See `data/prepare_data.py`

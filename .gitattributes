@@ -1,0 +1,9 @@
+# Normalize line endings: store text as LF, check out native on each platform.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending normalized.
+*.png binary
+*.xlsx binary
+*.feather binary
+*.so binary
+*.parquet binary

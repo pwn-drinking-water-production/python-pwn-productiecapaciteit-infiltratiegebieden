@@ -194,7 +194,7 @@ def analyse_a_leiding(df, res, werkzh_per, Q_avg=None, t_projectie="2023-10-31 0
         logging.info(f"=> Dropping: {pers[idrop]}")
 
         werkzh_per = remove_per_from_werkzh_per(werkzh_per, idrop)
-        logging.info(f"Remaining periods {werkzh_per}")
+        logging.info("Remaining periods %s", werkzh_per)
 
         res, dP_leiding_model = get_leiding_slope_per_year2(df, werkzh_per, freq="1H", Q=Q_avg, slope=slope)
 
@@ -228,7 +228,7 @@ for strang, c in config.iterrows():
     logger_handler.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
     stdout.setFormatter(logging.Formatter(f"{strang}\t| %(message)s"))
 
-    logging.info(f"Strang: {strang}")
+    logging.info("Strang: %s", strang)
 
     df_fp = os.path.join(data_fd, "Merged", f"{strang}.feather")
     df = pd.read_feather(df_fp)
@@ -278,7 +278,7 @@ for strang, c in config.iterrows():
     sv_out = res.x
     beta = sv_out[0]
     theta = sv_out[1:]
-    logging.info(f"('{strang}',\t{beta},\t{theta}),")
+    logging.info("('%s',	%s,	%s),", strang, beta, theta)
 
     slope, offsets = theta[0], theta[1:]
 
