@@ -1,7 +1,7 @@
 """
 Report to show how to increase capacity of the system
-Start with IKIEF
-Goals:
+Start with IKIEF 
+Goals: 
 1) how many m3/h does each "strang" currently produce at a suction pressure of -7.5 mwk?
 2) Per strang per element: how much m3/h can the production be increased by improving that element (e.g. the well clogging)
     Elements:
@@ -15,19 +15,19 @@ Goals:
 0) Validate pressure sensors (PTofsett)
 => semi-done. Check plots with Bas
 => moving maximum / 99prctl
-=> model: 90th prctl instead of median of
+=> model: 90th prctl instead of median of 
 => Bas: transient model to compute PT10offset
-1) Get WVPweerstand (infiltration lake + well clogging)
+1) Get WVPweerstand (infiltration lake + well clogging) 
     - Validate method of computation
     - Validate relationship with Q
-=>
+=> 
 2) Get filterweerstand (screen resistance)
     - Validate method of computation
     - Validate relationship with Q
 3) Get leidingweerstand (pipe resistance)
     - Validate method of computation
     - Validate relationship with Q
-    - fit to D'arcy-Weisbach?
+    - fit to D'arcy-Weisbach? 
     - Split into pipe resistance north-south and pipe resistance of the pipe towards the secundair
 4) Create graph m3/h (x) vs required suction pressure (y) for CURRENT situation
     - With bedrijfsvoering: get realistic max suction pressure
@@ -44,10 +44,9 @@ Goals:
 
 # %% imports
 import os
-
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
+import numpy as np
 from scipy.optimize import least_squares
 
 from productiecapaciteit import data_dir
@@ -57,12 +56,14 @@ from productiecapaciteit.src.strang_analyse_fun2 import (
 )
 
 # %% settings
-res_folder = os.path.abspath(os.path.join(__file__, "..", "..", "results", "Increase_capacity"))
+res_folder = os.path.abspath(
+    os.path.join(__file__, "..", "..", "results", "Increase_capacity")
+)
 os.makedirs(res_folder, exist_ok=True)
 
 """
 PT offset estimation using system curve reconstruction
-P=Poffset\u200b−(Rlin\u200b⋅Q+Rnl\u200b⋅Qβ)
+P=Poffset​−(Rlin​⋅Q+Rnl​⋅Qβ)
 so the amount of linear term is reflected by Rlin
 and the amount of nonlinear term is reflected by Rnl
 => expectation: IKIEF higher Rnl (more 'pipe')
@@ -78,14 +79,14 @@ Includes:
 """
 
 # %% settings
-window_hours = 12  # window length to identify stable flow periods
-Q_range_threshold = 20  # stability definition (m3/h)
-min_points = 8  # minimum samples inside window
+window_hours = 12             # window length to identify stable flow periods
+Q_range_threshold = 20         # stability definition (m3/h)
+min_points = 8                # minimum samples inside window
 
-rolling_days = 90  # window length to fit total system behaviour
+rolling_days = 90            # window length to fit total system behaviour
 min_points_fit = 10
-lowflowcutoff = 2  # maximum flow m3/h to be classified as low flow
-mintimelowflow = 4  # at least 4 hours of consecutive low flow for 'system at rest'
+lowflowcutoff = 2 # maximum flow m3/h to be classified as low flow
+mintimelowflow = 4 # at least 4 hours of consecutive low flow for 'system at rest'
 # beta per strang setting (estimated using below piece of script)
 # %% beta settings (per strang)
 beta_settings = {
@@ -120,10 +121,16 @@ beta_settings = {
 
 # %% get config
 config = get_config()
-# config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
+#config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
 
 # %% new: focus on low-flow data and good stable periods. Define settings per strang to get 'best' datapoints without too few datapoints.
 config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
+
+
+
+
+
+
 
 
 # # %% ESTIMATE BETA PER STRANG (ROBUST VERSION)
@@ -390,51 +397,15 @@ config = config.loc[["IK91", "IK93", "IK101", "IK103"]]
 
 # print("\n✅ Beta estimation complete.")
 
-
-# below function gets stable low flow periods as reference for
+# below function gets stable low flow periods as reference for 
 # pt10ofset. It deletes the first mintimelowflow and the last
-# low flow value from each period with stable low flow.
+# low flow value from each period with stable low flow. 
 # what is low flow? => determined by lowflowcutoff
-# -------------------------------------
-# FUNCTION: stable low-flow detection
-# -------------------------------------
-def get_stable_low_flow(df, lowflowcutoff, mintimelowflow):
-
-    low_mask = df["Q"] < lowflowcutoff
-    low_idx = df.index[low_mask]
-
-    if len(low_idx) == 0:
-        return df.iloc[[]]
-
-    groups = []
-    current_block = [low_idx[0]]
-
-    for i in range(1, len(low_idx)):
-        if (low_idx[i] - low_idx[i - 1]) <= pd.Timedelta("1.5h"):
-            current_block.append(low_idx[i])
-        else:
-            groups.append(current_block)
-            current_block = [low_idx[i]]
-
-    groups.append(current_block)
-
-    keep_indices = []
-
-    for block in groups:
-        # require enough length AFTER trimming
-        if len(block) < (mintimelowflow + 2):
-            continue
-
-        # remove transient start + last point
-        trimmed = block[mintimelowflow:-1]
-
-        keep_indices.extend(trimmed)
-
-    return df.loc[keep_indices]
 
 
 # %% loop
 for strang, c in config.iterrows():
+
     print(f"\nProcessing {strang}")
 
     # -------------------------------------
@@ -462,6 +433,7 @@ for strang, c in config.iterrows():
     period_stats = []
 
     for t, g in df.groupby(groups):
+
         if len(g) < min_points:
             continue
 
@@ -502,6 +474,7 @@ for strang, c in config.iterrows():
     prev_params = None
 
     for t in dfp.index:
+
         window_start = t - pd.Timedelta(days=rolling_days)
         g = dfp.loc[window_start:t]
 
@@ -534,9 +507,17 @@ for strang, c in config.iterrows():
             res = least_squares(
                 residuals,
                 x0,
-                bounds=([np.min(P_obs) - 2, 0, 0], [np.max(P_obs) + 2, 10, 10]),
+                bounds=([
+                    np.min(P_obs) - 2,
+                    0,
+                    0
+                ], [
+                    np.max(P_obs) + 2,
+                    10,
+                    10
+                ]),
                 loss="soft_l1",
-                max_nfev=80,
+                max_nfev=80
             )
         except:
             continue
@@ -545,7 +526,10 @@ for strang, c in config.iterrows():
         prev_params = res.x
 
         # OFFSET
-        offsets = g["P"] + (R_lin * (g["Q"] / Q_scale) + R_nl * ((g["Q"] / Q_scale) ** beta_fixed))
+        offsets = g["P"] + (
+            R_lin * (g["Q"]/Q_scale) +
+            R_nl * ( (g["Q"]/Q_scale)**beta_fixed )
+        )
 
         P_offset = np.median(offsets)
 
@@ -571,7 +555,7 @@ for strang, c in config.iterrows():
     rolling_days_smooth = 365
 
     R_lin_roll = dfr["R_lin"].rolling(f"{rolling_days_smooth}D", center=True).median()
-    R_nl_roll = dfr["R_nl"].rolling(f"{rolling_days_smooth}D", center=True).median()
+    R_nl_roll  = dfr["R_nl"].rolling(f"{rolling_days_smooth}D", center=True).median()
     P_offset_roll = dfr["P_offset"].rolling(f"{rolling_days_smooth}D", center=True).median()
 
     # -------------------------------------
@@ -592,8 +576,15 @@ for strang, c in config.iterrows():
     # -------------------------------------
     # R_lin
     # -------------------------------------
-    axes[0].scatter(dfr.index, dfr["R_lin"], s=10, alpha=0.5, color="C0", label="R_lin")
-    axes[0].plot(R_lin_roll.index, R_lin_roll, color="C0", linewidth=2)
+    axes[0].scatter(
+        dfr.index, dfr["R_lin"],
+        s=10, alpha=0.5, color="C0",
+        label="R_lin"
+    )
+    axes[0].plot(
+        R_lin_roll.index, R_lin_roll,
+        color="C0", linewidth=2
+    )
     axes[0].set_ylabel("R_lin")
     axes[0].grid(True)
     axes[0].legend()
@@ -601,8 +592,15 @@ for strang, c in config.iterrows():
     # -------------------------------------
     # R_nl
     # -------------------------------------
-    axes[1].scatter(dfr.index, dfr["R_nl"], s=10, alpha=0.5, color="C1", label="R_nl")
-    axes[1].plot(R_nl_roll.index, R_nl_roll, color="C1", linewidth=2)
+    axes[1].scatter(
+        dfr.index, dfr["R_nl"],
+        s=10, alpha=0.5, color="C1",
+        label="R_nl"
+    )
+    axes[1].plot(
+        R_nl_roll.index, R_nl_roll,
+        color="C1", linewidth=2
+    )
     axes[1].set_ylabel("R_nl")
     axes[1].grid(True)
     axes[1].legend()
@@ -612,23 +610,46 @@ for strang, c in config.iterrows():
     # -------------------------------------
 
     # ✅ 1. WELL HEAD (BOTTOM LAYER)
-    axes[2].scatter(low_flow.index, low_flow["gws0"], s=6, alpha=0.5, color="blue", label="Well head (gws0)")
+    axes[2].scatter(
+        low_flow.index, low_flow["gws0"],
+        s=6, alpha=0.5, color="blue",
+        label="Well head (gws0)"
+    )
 
     # ✅ rolling well head
     low_flow_gws0_roll = low_flow["gws0"].rolling("365D", center=True).median()
 
-    axes[2].plot(low_flow_gws0_roll.index, low_flow_gws0_roll, color="blue", linewidth=2)
+    axes[2].plot(
+        low_flow_gws0_roll.index,
+        low_flow_gws0_roll,
+        color="blue",
+        linewidth=2
+    )
 
     # ✅ 2. PT10 LOW-FLOW (MIDDLE LAYER)
-    axes[2].scatter(low_flow.index, low_flow["P"], s=6, alpha=0.5, color="green", label="PT10 (low-flow)")
+    axes[2].scatter(
+        low_flow.index, low_flow["P"],
+        s=6, alpha=0.5, color="green",
+        label="PT10 (low-flow)"
+    )
 
     if low_flow_roll is not None:
-        axes[2].plot(low_flow_roll.index, low_flow_roll, color="green", linewidth=2)
+        axes[2].plot(
+            low_flow_roll.index, low_flow_roll,
+            color="green", linewidth=2
+        )
 
     # ✅ 3. MODEL (TOP LAYER)
-    axes[2].scatter(dfr.index, dfr["P_offset"], s=10, alpha=0.7, color="black", label="PT10 (model)")
+    axes[2].scatter(
+        dfr.index, dfr["P_offset"],
+        s=10, alpha=0.7, color="black",
+        label="PT10 (model)"
+    )
 
-    axes[2].plot(P_offset_roll.index, P_offset_roll, color="black", linewidth=2)
+    axes[2].plot(
+        P_offset_roll.index, P_offset_roll,
+        color="black", linewidth=2
+    )
 
     # -------------------------------------
     # FORMATTING
@@ -636,14 +657,21 @@ for strang, c in config.iterrows():
     axes[2].set_ylabel("Head (m NAP)")
     axes[2].grid(True)
 
-    axes[2].legend(loc="upper left", fontsize="small", ncol=2)
+    axes[2].legend(
+        loc="upper left",
+        fontsize="small",
+        ncol=2
+    )
 
     plt.xlabel("Time")
     fig.suptitle(f"{strang} – PT10 vs well head (low-flow + model)")
 
     plt.tight_layout()
 
-    plt.savefig(os.path.join(res_folder, f"{strang}_rolling.png"), dpi=300)
+    plt.savefig(
+        os.path.join(res_folder, f"{strang}_rolling.png"),
+        dpi=300
+    )
 
     plt.close()
 
@@ -663,12 +691,17 @@ for strang, c in config.iterrows():
     n_rows = len(years)
     n_cols = n_per_year
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharex=False, sharey=False)
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(5*n_cols, 4*n_rows),
+        sharex=False, sharey=False
+    )
 
     if n_rows == 1:
         axes = np.array([axes])
 
     for i, year in enumerate(years):
+
         dfr_year = dfr_valid[dfr_valid["year"] == year]
 
         if len(dfr_year) < n_per_year:
@@ -677,6 +710,7 @@ for strang, c in config.iterrows():
             sample_idx = dfr_year.sample(n_per_year, random_state=42).index
 
         for j in range(n_cols):
+
             ax = axes[i, j]
 
             if j >= len(sample_idx):
@@ -687,7 +721,7 @@ for strang, c in config.iterrows():
 
             # ✅ centered window (FIXED)
             window_start = t - pd.Timedelta(days=rolling_days / 2)
-            window_end = t + pd.Timedelta(days=rolling_days / 2)
+            window_end   = t + pd.Timedelta(days=rolling_days / 2)
             g = dfp.loc[window_start:window_end]
 
             row = dfr.loc[t]
@@ -700,10 +734,13 @@ for strang, c in config.iterrows():
             ax.scatter(g["Q"], g["P"], s=10, alpha=0.4)
 
             # model curve
-            Q_line = np.linspace(0, g["Q"].max() * 1.1, 100)
+            Q_line = np.linspace(0, g["Q"].max()*1.1, 100)
             Qn_line = Q_line / Q_scale
 
-            P_line = P_offset - (R_lin * Qn_line + R_nl * Qn_line**beta_fixed)
+            P_line = P_offset - (
+                R_lin * Qn_line +
+                R_nl * Qn_line**beta_fixed
+            )
 
             ax.plot(Q_line, P_line, color="red")
             ax.scatter([0], [P_offset], color="black", s=50)
@@ -720,7 +757,10 @@ for strang, c in config.iterrows():
 
     plt.tight_layout()
 
-    plt.savefig(os.path.join(res_folder, f"{strang}_random_fits_per_year.png"), dpi=300)
+    plt.savefig(
+        os.path.join(res_folder, f"{strang}_random_fits_per_year.png"),
+        dpi=300
+    )
 
     plt.close()
 
