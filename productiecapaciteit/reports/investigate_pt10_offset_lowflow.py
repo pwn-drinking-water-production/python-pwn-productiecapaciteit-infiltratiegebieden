@@ -43,29 +43,29 @@ weighfac = {"IK91": 0.2,"IK92": 0.2,"IK93": 0.2,"IK94": 0.2,"IK95": 0.2,"IK96": 
 
 # manually defined breakpoints for multiline fit (ISO dates, one list per strang)
 breakpoints = {
-"IK91": ["2019-06-01"],
-"IK92": [],
-"IK93": [],
-"IK94": [],
-"IK95": [],
+"IK91": ["2019-06-01"], 
+"IK92": [], 
+"IK93": [], 
+"IK94": [], 
+"IK95": [], 
 "IK96": [],
-"IK101": ["2022-06-01"],
-"IK102": [],
-"IK103": [],
-"IK104": [],
-"IK105": [],
+"IK101": ["2022-06-01"], 
+"IK102": [], 
+"IK103": [], 
+"IK104": [], 
+"IK105": [], 
 "IK106": [],
-"P100": [],
-"P200": [],
-"P300": ["2018-01-01","2023-01-01"],
-"P400": [],
-"P500": [],
+"P100": [], 
+"P200": [], 
+"P300": ["2018-01-01","2023-01-01"], 
+"P400": [], 
+"P500": [], 
 "P600": ["2014-05-15","2022-01-01"],
 "Q100": ["2019-03-01"],
-"Q200": [],
-"Q300": [],
-"Q400": [],
-"Q500": [],
+"Q200": [], 
+"Q300": [], 
+"Q400": [], 
+"Q500": [], 
 "Q600": []
 }
 
@@ -203,7 +203,7 @@ def split_by_breakpoints(t, y, w, strang):
 
 
 def build_timeseries_fit(df_index, t_evt, method, strang,
-                         a=None, b=None, segments=None,
+                         a=None, b=None, segments=None, 
                          fixed_offset_val=None):
 
     t0 = t_evt.min()
@@ -246,7 +246,7 @@ def build_timeseries_fit(df_index, t_evt, method, strang,
 
         return ts.ffill().bfill()
 
-
+  
     elif method == "fixed_offset":
         return pd.Series(fixed_offset_val, index=df_index)
 
@@ -337,8 +337,8 @@ for strang, c in config.iterrows():
         dP_raw=lf_all["P"] - lf_all["gws0"],
         t=t_evt,
         dP=y,
-        P_corr_raw=P_corr_raw,
-        P_corr_sel=P_corr_sel,
+        P_corr_raw=P_corr_raw,     
+        P_corr_sel=P_corr_sel,     
         fit_global=(a, b),
         fit_segments=segs,
         corr_series=corr_series,
@@ -440,7 +440,7 @@ for strang in store:
 
         last_t = tl_seg[-1]
         last_y = yl_seg[-1]
-
+    
     if strang in breakpoints:
         for bp in pd.to_datetime(breakpoints[strang]):
             ax[2].axvline(bp, color="black", ls="--", alpha=0.4)
@@ -525,3 +525,6 @@ out_fp = os.path.join(res_folder, "PT10_corr_all.feather")
 df_corr.reset_index().rename(columns={"index": "Datum"}).to_feather(out_fp)
 
 print(f"Saved → {out_fp}")
+
+
+
