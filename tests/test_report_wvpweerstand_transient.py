@@ -612,6 +612,12 @@ def test_series_head_loss_is_zero_without_volume_or_flow_ref():
     dfm = pd.DataFrame({"Q": [1.0, 2.0, 3.0], "cumulative_volume_m3": [0.0, 1e4, 2e4]}, index=index)
     np.testing.assert_allclose(report.series_head_loss(coeff0, dfm).to_numpy(), 0.0)
 
+    # The guard short-circuits BEFORE the viscosity factor, even with temperature active.
+    coeff_sin = default_transient_coefficients(
+        series_flow_ref_m3_per_h=0.0, temperature_method="sin", temperature_delta_degc=8.0
+    )
+    np.testing.assert_allclose(report.series_head_loss(coeff_sin, dfm).to_numpy(), 0.0)
+
 
 def test_series_head_loss_clips_negative_growth_factor():
     # A growth large enough to drive (1 + g*V) negative before the datum is clipped at 0.
@@ -849,3 +855,87 @@ def test_cumulative_extracted_volume_rejects_unsorted_index():
 def test_cumulative_extracted_volume_rejects_non_datetime_index():
     with pytest.raises(TypeError, match="DatetimeIndex"):
         report.cumulative_extracted_volume_m3(pd.Series([1.0, 2.0, 3.0]), datum=pd.Timestamp("2015-01-01"))
+
+
+def _series_temperature_coefficients(**overrides):
+    # method="sin" with a seasonal amplitude -> a TIME-VARYING viscosity ratio (!= 1), so the
+    # element-wise multiply cannot be faked by a scalar broadcast.
+    kwargs = dict(
+        series_dp_ref_m=0.5,
+        series_flow_ref_m3_per_h=16.0,
+        series_growth_per_m3=2.0e-5,
+        temperature_method="sin",
+        temperature_mean_degc=12.0,
+        temperature_delta_degc=8.0,
+        temperature_ref_degc=12.0,
+    )
+    kwargs.update(overrides)
+    return default_transient_coefficients(**kwargs)
+
+
+def _positive_series_dfm(index):
+    # Strictly positive flow and strictly positive growth factor (1 + g*V > 0), so the series head
+    # loss is never 0 and ratios are well-posed.
+    flow = np.full(index.size, 12.0)
+    volume = np.linspace(-2.0e4, 8.0e4, index.size)  # 1 + 2e-5*V in [0.6, 2.6]
+    return pd.DataFrame({"Q": flow, "cumulative_volume_m3": volume}, index=index)
+
+
+def test_series_head_loss_scales_with_temperature_viscosity():
+    # dp_series == (dp_ref/Q_ref)*Q*(1+g*V) * model_viscratio(index), element-wise, with a
+    # time-varying viscratio. Kills: not-applied, inverse-direction, baseline-only, and
+    # collapse-to-scalar/broadcast.
+    index = pd.date_range("2015-01-01", periods=24, freq="15D")  # ~1 yr -> seasonal viscratio
+    coeff = _series_temperature_coefficients()
+    dfm = _positive_series_dfm(index)
+
+    viscratio = coeff.wvpt.model_viscratio(index).to_numpy(dtype=float)
+    assert viscratio.min() < 0.98 and viscratio.max() > 1.02  # genuinely time-varying, != 1
+
+    flow = dfm["Q"].to_numpy(dtype=float)
+    volume = dfm["cumulative_volume_m3"].to_numpy(dtype=float)
+    expected = 0.5 / 16.0 * flow * (1.0 + 2.0e-5 * volume) * viscratio
+    np.testing.assert_allclose(report.series_head_loss(coeff, dfm).to_numpy(), expected, rtol=1e-12)
+
+
+def test_series_and_aquifer_share_the_same_viscosity_factor():
+    # The series scaling factor equals the aquifer's kD viscosity factor (kD_ref_model/kD_model) --
+    # the physical rationale: the series stiffens with the SAME viscosity the aquifer uses.
+    index = pd.date_range("2015-01-01", periods=24, freq="15D")
+    coeff = _series_temperature_coefficients()
+    dfm = _positive_series_dfm(index)
+
+    flow = dfm["Q"].to_numpy(dtype=float)
+    volume = dfm["cumulative_volume_m3"].to_numpy(dtype=float)
+    reference_temp_series = 0.5 / 16.0 * flow * (1.0 + 2.0e-5 * volume)  # strictly > 0
+    aquifer_viscratio = (
+        coeff.wvpt.kD_ref_model(index) / coeff.wvpt.kD_model(index)
+    ).to_numpy(dtype=float)
+
+    series_factor = report.series_head_loss(coeff, dfm).to_numpy() / reference_temp_series
+    np.testing.assert_allclose(series_factor, aquifer_viscratio, rtol=1e-12)
+
+
+def test_series_contribution_through_pipeline_scales_with_temperature():
+    # Independent-truth analog of test_series_baseline_present_at_zero_growth, for sin + g != 0:
+    # through the FULL transient_drawdown_for_coefficients pipeline, the series contribution equals
+    # an INDEPENDENTLY built (dp_ref/Q_ref)*Q*(1+g*V)*model_viscratio. This catches drop/inverse
+    # viscratio -- which a self-referential fit test (truth and fit share series_head_loss) cannot,
+    # because the viscratio error cancels between the synthetic truth and the fitted model.
+    ci = _ci()
+    index = pd.date_range("2015-01-01", periods=24, freq="15D")
+    flow = np.full(index.size, 12.0)
+    volume = np.linspace(-2.0e4, 8.0e4, index.size)
+    g = 2.0e-5
+    coeff = _series_temperature_coefficients(series_growth_per_m3=g)  # dp_ref=0.5, q_ref=16, sin
+    dfm_with = pd.DataFrame({"Q": flow, "cumulative_volume_m3": volume}, index=index)
+    dfm_without = pd.DataFrame({"Q": flow}, index=index)  # no volume column -> no series term
+
+    # series_growth_per_m3=g must be passed (it overrides the coefficient growth); the aquifer part
+    # is identical between the two calls (same index, same Q), so their difference is the series term.
+    with_series = transient_drawdown_for_coefficients(80.0, 150.0, dfm_with, coeff, ci, series_growth_per_m3=g)
+    without_series = transient_drawdown_for_coefficients(80.0, 150.0, dfm_without, coeff, ci, series_growth_per_m3=g)
+
+    viscratio = coeff.wvpt.model_viscratio(index).to_numpy(dtype=float)
+    expected_series = 0.5 / 16.0 * flow * (1.0 + g * volume) * viscratio
+    np.testing.assert_allclose((with_series - without_series).to_numpy(), expected_series, rtol=1e-9)

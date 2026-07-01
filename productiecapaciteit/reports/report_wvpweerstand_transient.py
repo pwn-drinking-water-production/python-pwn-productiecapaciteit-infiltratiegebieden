@@ -95,7 +95,8 @@ DEFAULT_KD_REF_DATUM = pd.Timestamp("2020-01-01")
 # so kD_ref stays the physical aquifer transmissivity (the baseline is explicit, not absorbed).
 # dp_ref (0.5 m), Q_ref (the 95th-percentile flow) and the datum are FIXED/known inputs; only
 # the growth rate g is fitted. g is bounded so that (1 + g*V) >= 0 over the record and, absent
-# pre-datum data, so the loss cannot grow past SERIES_MAX_GROWTH_FACTOR x the baseline.
+# pre-datum data, so the growth factor (1 + g*V) cannot exceed SERIES_MAX_GROWTH_FACTOR (the total
+# loss also carries the temperature viscosity factor).
 # dp_ref is a FIXED assumption (not fitted); if the true infiltration+borehole baseline differs,
 # kD_ref absorbs the difference. flow_ref defaults to 0.0 -- a "not yet calibrated" sentinel that
 # makes series_head_loss return 0 (the q_ref<=0 guard) until main sets it to the 95th-pct flow, so
@@ -352,14 +353,12 @@ def cumulative_extracted_volume_m3(flow_m3h, datum):
 def series_head_loss(coefficients, dfm):
     """Lumped infiltration + borehole-wall head loss [m], positive meters.
 
-    ``dp_series(t) = (dp_ref / Q_ref) * Q(t) * (1 + g * V(t))`` -- the fixed 0.5 m baseline at the
-    reference high flow, scaled by the actual flow and grown by the fitted rate ``g`` over the
-    signed cumulative throughput ``V(t)``. Returns zeros when the volume column is absent or the
-    reference flow is non-positive (the series term is then unidentifiable).
+    ``dp_series(t) = viscratio(T) * (dp_ref / Q_ref) * Q(t) * (1 + g * V(t))`` -- the fixed 0.5 m
+    baseline at the reference high flow AND reference temperature, scaled by the actual flow, grown
+    by the fitted rate ``g`` over the signed cumulative throughput ``V(t)``, and scaled by the
+    viscosity ratio for the modeled temperature. Returns zeros when the volume column is absent or
+    the reference flow is non-positive (the series term is then unidentifiable).
     """
-    # Not viscosity(temperature)-scaled: a laminar series resistance physically scales with mu(T),
-    # but this is consistent with the aquifer term only while temperature_method="Niet"
-    # (viscratio==1). If "sin" is ever enabled, multiply this by wvpt.model_viscratio(index) too.
     dp_ref = float(coefficients["series_dp_ref_m"])
     q_ref = float(coefficients["series_flow_ref_m3_per_h"])
     growth_rate = float(coefficients["series_growth_per_m3"])
@@ -368,7 +367,13 @@ def series_head_loss(coefficients, dfm):
     volume = dfm["cumulative_volume_m3"].to_numpy(dtype=float)
     flow = dfm["Q"].to_numpy(dtype=float)
     growth = np.maximum(1.0 + growth_rate * volume, 0.0)  # positivity safety net
-    return pd.Series(dp_ref / q_ref * flow * growth, index=dfm.index, name="series_head_loss")
+    # A viscous series resistance scales with dynamic viscosity mu(T): multiply by the SAME
+    # viscosity ratio the aquifer kD uses (model_viscratio -- the report runs dp_model with
+    # temp_wvp=None, so both use the temperature model). dp_ref is defined at the reference
+    # temperature; the growth (1 + g*V) is a temperature-free geometric clogging term. Under
+    # temperature_method="Niet" viscratio == 1, so this is a bit-for-bit no-op there.
+    viscratio = coefficients.wvpt.model_viscratio(dfm.index).to_numpy(dtype=float)
+    return pd.Series(dp_ref / q_ref * flow * growth * viscratio, index=dfm.index, name="series_head_loss")
 
 
 def load_observations(
@@ -465,8 +470,9 @@ def fit_transient_coefficients(  # noqa: C901
     (``series_growth_per_m3``) is fitted in linear space. Because the series head loss is LINEAR
     in ``g`` with a FIXED baseline, the joint fit is well-conditioned (no multimodality from the
     clogging), unlike a kD-modifying term. ``g`` is bounded ``[0, g_upper]`` so that
-    ``(1 + g*V) >= 0`` over the record and, without pre-datum data, the loss cannot grow past
-    ``SERIES_MAX_GROWTH_FACTOR`` x the baseline. ``x_scale="jac"`` handles the tiny scale of ``g``.
+    ``(1 + g*V) >= 0`` over the record and, without pre-datum data, the growth factor ``(1 + g*V)``
+    cannot exceed ``SERIES_MAX_GROWTH_FACTOR`` (the total loss also carries the viscosity factor).
+    ``x_scale="jac"`` handles the tiny scale of ``g``.
     """
     kd_lower, kd_upper = np.asarray(kd_bounds_m2_per_d, dtype=float)
     leak_lower, leak_upper = np.asarray(leakage_bounds_d, dtype=float)
