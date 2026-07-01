@@ -1,0 +1,40 @@
+name: Functional Testing
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: functional-testing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the effective floor: the dawacotools git dependency requires
+        # Python >= 3.12, so 3.10/3.11 cannot resolve even though the project
+        # metadata currently advertises requires-python ">= 3.10".
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Create the virtual environment
+        run: uv venv --python ${{ matrix.python-version }}
+
+      - name: Install the package with its test dependencies
+        run: uv pip install ".[test]"
+
+      - name: Run the test suite
+        # --no-sync: the step above already populated .venv. Skip uv's automatic
+        # project re-sync, which would fail to resolve a universal lock across
+        # requires-python (">= 3.10") while dawacotools needs ">= 3.12".
+        run: uv run --no-sync pytest tests
