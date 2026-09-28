@@ -209,11 +209,28 @@ def test_variable_kd_steady_initial_condition_matches_steady_limit(hantush_case)
     np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-8)
 
 
+def _leaky_tail_quad(alpha2, leakage_rate, lower, *, moment=False, shift=0.0):
+    """Reference ``int_lower^inf exp(-alpha^2/w - c (w - shift)) / w^(1 - moment) dw`` by quadrature.
+
+    Doubling breakpoints from ``lower`` past the peak (``w ~ alpha^2`` or ``alpha / sqrt(c)``)
+    and the decay, so no piece spans more than a factor two of the ``1/w``-like integrand and a
+    distant peak cannot be missed. The neglected tail beyond ``60 / c`` is below ``exp(-60)``.
+    """
+    span_end = lower + 100.0 * alpha2 + 10.0 * np.sqrt(alpha2 / leakage_rate) + 60.0 / leakage_rate
+    edges = np.geomspace(lower, span_end, max(2, int(np.ceil(np.log2(span_end / lower))) + 1))
+
+    def integrand(w):
+        value = np.exp(-alpha2 / w - leakage_rate * (w - shift))
+        return value if moment else value / w
+
+    return sum(quad(integrand, lo, hi, epsabs=1e-16, epsrel=1e-12, limit=200)[0] for lo, hi in pairwise(edges))
+
+
 @pytest.mark.parametrize("leakage_resistance", [200.0, 5000.0])
 def test_variable_kd_initial_condition_resolves_distant_image_well(leakage_resistance):
     # A distant (image) well's pre-period drawdown integrand exp(-alpha^2/k - b (k - K_i)) / k
     # peaks near k = alpha^2, far above the lower limit K_i. A single adaptive quad over
-    # [K_i, inf) can miss that peak; the reference splits the range at geometric breakpoints.
+    # [K_i, inf) can miss that peak; the reference splits it at doubling breakpoints.
     index = pd.date_range("2020-01-01", periods=60, freq="12h")
     time_days = np.asarray((index - index[0]) / pd.Timedelta("1D"), dtype=float)
     kD = 100.0 * (1.0 + 0.2 * np.sin(2.0 * np.pi * time_days / 365.0))
@@ -229,14 +246,7 @@ def test_variable_kd_initial_condition_resolves_distant_image_well(leakage_resis
     expected = np.empty(index.size)
     expected[0] = initial_q / (4.0 * np.pi * kD[0]) * 2.0 * k0(2.0 * alpha * beta / np.sqrt(kD[0]))
     for i in range(1, index.size):
-        lower = cumulative_kd[i]
-        edges = np.geomspace(lower, lower + 60.0 / b + alpha * alpha * 100.0, 60)
-
-        def integrand(k, lower=lower):
-            return np.exp(-alpha * alpha / k - b * (k - lower)) / k
-
-        integral = sum(quad(integrand, lo, hi, epsabs=1e-16, epsrel=1e-12, limit=200)[0] for lo, hi in pairwise(edges))
-        integral += quad(integrand, edges[-1], np.inf, epsabs=1e-16, epsrel=1e-12)[0]
+        integral = _leaky_tail_quad(alpha * alpha, b, cumulative_kd[i], shift=cumulative_kd[i])
         expected[i] = initial_q * np.exp(-beta * beta * time_days[i]) / (4.0 * np.pi * kD[0]) * integral
 
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0.0)
@@ -626,8 +636,10 @@ def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch, leak
     assert max(seen_alpha2) <= target_alpha2 * (1.0 + 1e-9)
 
 
-@pytest.mark.parametrize("alpha2", [4.5e-3, 11.25, 4.5e3])
-@pytest.mark.parametrize("leakage_rate", [1e-5, 1e-3, 0.0455])
+@pytest.mark.parametrize(
+    ("alpha2", "leakage_rate"),
+    [(a, c) for a in (4.5e-3, 11.25, 4.5e3) for c in (1e-5, 1e-3, 0.0455) if 4.0 * a * c < funs._HANTUSH_RHO_MAX**2],
+)
 def test_kd_antiderivative_well_function_matches_quadrature(alpha2, leakage_rate):
     # The exact leaky segment integrals of the near window: the tails F = (1/4pi) int_kappa^inf
     # exp(-alpha^2/w - c w)/w dw (the Hantush well function W(c kappa, 2 alpha sqrt(c))) and
@@ -637,22 +649,6 @@ def test_kd_antiderivative_well_function_matches_quadrature(alpha2, leakage_rate
     kappa = np.array([0.0, 1e-6, 1e-3, 0.1, 1.0, 6.9, 55.0, 400.0, 2400.0])
     well, moment = funs._kd_antiderivative_well_function(kappa, alpha2, leakage_rate)
     rho = 2.0 * np.sqrt(leakage_rate * alpha2)
-    if rho >= funs._HANTUSH_RHO_MAX:
-        assert 2.0 * k0(rho) < 1e-11  # dropped terms are below the accuracy of the whole
-        np.testing.assert_array_equal(well, 0.0)
-        np.testing.assert_array_equal(moment, 0.0)
-        return
-
-    def tail(integrand, lower):
-        # Doubling breakpoints from the lower limit through the peak (w = alpha / sqrt(c)) and
-        # the decay, so no piece spans more than a factor two of the 1/w-like integrand. The
-        # neglected tail beyond 60 / c is below exp(-60) relative.
-        peak = np.sqrt(alpha2 / leakage_rate)
-        span_end = lower + 10.0 * peak + 60.0 / leakage_rate
-        n_edges = max(2, int(np.ceil(np.log2(span_end / lower))) + 1)
-        edges = np.geomspace(lower, span_end, n_edges)
-        return sum(quad(integrand, lo, hi, epsabs=1e-15, epsrel=1e-12, limit=200)[0] for lo, hi in pairwise(edges))
-
     expected_well = np.empty_like(kappa)
     expected_moment = np.empty_like(kappa)
     for i, k in enumerate(kappa):
@@ -660,10 +656,22 @@ def test_kd_antiderivative_well_function_matches_quadrature(alpha2, leakage_rate
             expected_well[i] = 2.0 * k0(rho)
             expected_moment[i] = rho * k1(rho) / leakage_rate
             continue
-        expected_well[i] = tail(lambda w: np.exp(-alpha2 / w - leakage_rate * w) / w, k)
-        expected_moment[i] = tail(lambda w: np.exp(-alpha2 / w - leakage_rate * w), k)
+        expected_well[i] = _leaky_tail_quad(alpha2, leakage_rate, k)
+        expected_moment[i] = _leaky_tail_quad(alpha2, leakage_rate, k, moment=True)
     np.testing.assert_allclose(well * 4.0 * np.pi, expected_well, rtol=1e-9, atol=1e-13)
     np.testing.assert_allclose(moment * 4.0 * np.pi, expected_moment, rtol=1e-9, atol=1e-13)
+
+
+def test_kd_antiderivative_well_function_drops_negligible_terms():
+    # rho = 2 sqrt(c alpha^2) above _HANTUSH_RHO_MAX: the whole well function 2 K0(rho) is below
+    # the accuracy of the near-well terms, so the term is dropped (zero F and G).
+    alpha2, leakage_rate = 4.5e3, 0.0455
+    rho = 2.0 * np.sqrt(leakage_rate * alpha2)
+    assert rho >= funs._HANTUSH_RHO_MAX
+    assert 2.0 * k0(rho) < 1e-11
+    well, moment = funs._kd_antiderivative_well_function(np.array([0.0, 1.0, 400.0]), alpha2, leakage_rate)
+    np.testing.assert_array_equal(well, 0.0)
+    np.testing.assert_array_equal(moment, 0.0)
 
 
 def test_kd_grid_point_source_kernel_matches_direct_e1():

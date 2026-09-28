@@ -30,25 +30,30 @@ _KD_GRID_MEMORY_DECAY = 22.0
 # cumulative-kD step, so a single very short interval can blow n_grid up; reject such
 # pathological grids with a clear error instead of silently allocating multi-GB arrays.
 # _KD_GRID_NEAR_MAX_ELEMENTS bounds the near-window row-block so peak memory does not scale
-# with nt * near_cells.
+# with nt times the number of near-window segments per target.
 _KD_GRID_MAX_NODES = 20_000_000
 _KD_GRID_NEAR_MAX_ELEMENTS = 4_000_000
-# Time sub-steps per data interval in the exact near window (capped by n_per_step). The window
-# is exact up to the piecewise-linear cumulative kD and source density within a sub-step, a
-# second-order error (~1e-6 with seasonal kD), so two sub-steps suffice (see
-# _variable_kd_near_window_drawdown).
+# Blocks whose source or kernel is at most this long are convolved directly: at small c there
+# are hundreds of short blocks where FFT overhead dominates, and the direct sum also avoids the
+# FFT round-off that referencing a block to its end time amplifies (up to exp(17)).
+_KD_GRID_DIRECT_CONV_MAX = 1000
+# Time sub-steps per data interval in the exact near window. The window is exact up to the
+# piecewise-linear cumulative kD and source density within a sub-step, a second-order error
+# (~1e-5 with seasonal kD), so two sub-steps suffice (see _variable_kd_near_window_drawdown).
 _KD_GRID_NEAR_SUBSTEPS = 2
 # Hantush well-function series controls (see _kd_antiderivative_well_function). A term whose
 # leaky argument rho = 2 alpha beta / sqrt(kD) exceeds _HANTUSH_RHO_MAX is dropped: its whole
-# well function 2 K0(rho) is below 2e-12 (the near-well terms are O(10)).
+# well function 2 K0(rho) is below 2e-12 (the near-well terms are O(10)). The cap also bounds
+# the series ratio b <= rho / 2 < 13, so the loop ends long before _HANTUSH_SERIES_MAX_TERMS,
+# which is only a guard.
 _HANTUSH_RHO_MAX = 26.0
 _HANTUSH_SERIES_TOL = 1e-18
 _HANTUSH_SERIES_MAX_TERMS = 200
 # Far-kernel moment expansion (see _kd_grid_point_source_kernel): a term is folded into the
 # combined power series once alpha^2 / w <= _KD_GRID_MOMENT_X_MAX, and evaluated with E1
 # directly closer to its peak. The series is truncated where x^n / (n n!) < 1e-18 at that bound.
-_KD_GRID_MOMENT_X_MAX = 2.0
-_KD_GRID_MOMENT_TERMS = 24
+_KD_GRID_MOMENT_X_MAX = 4.0
+_KD_GRID_MOMENT_TERMS = 34
 
 
 def _hantush_series_threshold(n):
@@ -92,16 +97,16 @@ def _kd_antiderivative_well_function(kappa, alpha2, leakage_rate):
     b = np.minimum(u, x)
 
     # Alternating series with term_n = (-b)^n / n!: W uses E_{n+1}(a), the direct I uses
-    # E_n(a) (n >= 1) and the reflected I uses E_{n+2}(a). Every element stays active while
-    # b^n / n! exceeds the tolerance, so the active set shrinks with n and is compacted
-    # whenever it has halved.
+    # E_n(a) (n >= 1) and the reflected I uses E_{n+2}(a). The loop runs while any element's
+    # b^n / n! exceeds the tolerance; the working set is compacted to those elements whenever
+    # it has halved (the others keep adding sub-tolerance terms until then).
     exp_neg_a = np.exp(-a)
     e_cur = exp1(a)
     e_next = exp_neg_a - a * e_cur
     well = e_cur.copy()
     moment_direct = np.zeros_like(a)
     moment_reflect = e_next.copy()
-    idx = None
+    idx = np.arange(a.size)
     a_sub, b_sub, exp_sub, term = a, b, exp_neg_a, np.ones_like(a)
     for n in range(1, _HANTUSH_SERIES_MAX_TERMS + 1):
         active = b_sub > _hantush_series_threshold(n)
@@ -109,20 +114,15 @@ def _kd_antiderivative_well_function(kappa, alpha2, leakage_rate):
         if n_active == 0:
             break
         if active.size > 2 * n_active:
-            idx = np.flatnonzero(active) if idx is None else idx[active]
+            idx = idx[active]
             a_sub, b_sub, exp_sub, term = a_sub[active], b_sub[active], exp_sub[active], term[active]
             e_cur, e_next = e_cur[active], e_next[active]
         e_prev, e_cur = e_cur, e_next
         e_next = (exp_sub - a_sub * e_cur) / (n + 1)
         term *= -b_sub / n
-        if idx is None:
-            well += term * e_cur
-            moment_direct += term * e_prev
-            moment_reflect += term * e_next
-        else:
-            well[idx] += term * e_cur
-            moment_direct[idx] += term * e_prev
-            moment_reflect[idx] += term * e_next
+        well[idx] += term * e_cur
+        moment_direct[idx] += term * e_prev
+        moment_reflect[idx] += term * e_next
 
     moment = exp_neg_a + a * moment_direct
     if reflect.any():
@@ -145,9 +145,14 @@ def _kd_grid_point_source_kernel(mults, alpha2s, w):
     ``sum_m mult_m E1(x_m) = M_0 (ln w - gamma) - sum mult_m ln alpha_m^2 + sum_n (-1)^(n+1)
     M_n / (n n! w^n)``. Sorting the terms by ``alpha^2`` makes that subset a prefix, so the
     moments are prefix sums looked up per node. Only the few nodes near each term's peak
-    need a direct ``E1``, which makes the cost independent of the number of wells. Both
-    branches are exact to round-off; ``w = 0`` gives zero (``E1(inf) = 0``).
+    need a direct ``E1``; with ``w`` sorted those nodes are a prefix per term, so the cost grows
+    only with the number of direct (node, term) pairs. Both branches are exact to round-off;
+    ``w = 0`` gives zero (``E1(inf) = 0``).
     """
+    w = np.asarray(w, dtype=float)
+    out = np.zeros_like(w)
+    if alpha2s.size == 0:
+        return out
     order = np.argsort(alpha2s)
     alpha2_sorted = alpha2s[order]
     mult_sorted = mults[order]
@@ -157,12 +162,9 @@ def _kd_grid_point_source_kernel(mults, alpha2s, w):
     prefix_moments[:, 1:] = np.cumsum(mult_sorted * alpha2_sorted[None, :] ** n_moment[:, None], axis=1)
     prefix_log = np.r_[0.0, np.cumsum(mult_sorted * np.log(alpha2_sorted))]
 
-    w = np.asarray(w, dtype=float)
-    out = np.zeros_like(w)
-    if alpha2s.size == 0:
-        return out
     positive = w > 0.0
-    w_pos = w[positive]
+    w_order = np.argsort(w[positive], kind="stable")
+    w_pos = w[positive][w_order]
     prefix = np.searchsorted(alpha2_sorted, _KD_GRID_MOMENT_X_MAX * w_pos, side="right")
     series = prefix_moments[0, prefix] * (np.log(w_pos) - np.euler_gamma) - prefix_log[prefix]
     inv_w_power = np.ones_like(w_pos)
@@ -171,11 +173,12 @@ def _kd_grid_point_source_kernel(mults, alpha2s, w):
         series += (-1.0) ** (n + 1) / (n * math.factorial(n)) * prefix_moments[n, prefix] * inv_w_power
 
     # Direct E1 for the (node, term) pairs before the term joins the series (w < alpha^2 / x_max).
-    for mult, alpha2 in zip(mult_sorted.tolist(), alpha2_sorted.tolist(), strict=True):
-        direct = w_pos < alpha2 / _KD_GRID_MOMENT_X_MAX
-        if direct.any():
-            series[direct] += mult * exp1(alpha2 / w_pos[direct])
-    out[positive] = series
+    n_direct = np.searchsorted(w_pos, alpha2_sorted / _KD_GRID_MOMENT_X_MAX, side="left")
+    for mult, alpha2, n in zip(mult_sorted.tolist(), alpha2_sorted.tolist(), n_direct.tolist(), strict=True):
+        series[:n] += mult * exp1(alpha2 / w_pos[:n])
+    series_unsorted = np.empty_like(series)
+    series_unsorted[w_order] = series
+    out[positive] = series_unsorted
     return out
 
 
@@ -848,6 +851,7 @@ def hantush_variable_kd(alpha, beta, kD, **pextra):
             q_interval,
             time_days,
             kd_fun,
+            cumulative_kd_fun,
             cumulative_kd,
             finite_radius_alpha2=alpha * alpha,
             n_per_step=n_per_step,
@@ -1083,6 +1087,7 @@ def _variable_kd_rate_drawdown_kd_grid(
     q_interval,
     time_days,
     kd_fun,
+    cumulative_kd_fun,
     cumulative_kd,
     *,
     finite_radius_alpha2,
@@ -1104,7 +1109,7 @@ def _variable_kd_rate_drawdown_kd_grid(
 
     Only the well at which the head is of interest carries a **finite well radius**: its
     term sits at ``alpha^2 == finite_radius_alpha2`` (= ``r_well^2 * S / 4``), the smallest
-    and steepest kernel, and gets the exact near-window integral on the data nodes that
+    and steepest kernel, and gets the exact near-window integral on time sub-steps that
     resolves its sub-grid diagonal peak. All other wells in the series and every mirror
     well are modelled with an **infinitely small well radius** (point sources): their
     kernels are smooth at the relevant distances and ride the combined far kernel only,
@@ -1114,7 +1119,7 @@ def _variable_kd_rate_drawdown_kd_grid(
     Accuracy note: the near window integrates each segment in closed form (Hantush well
     function on time sub-steps, :func:`_variable_kd_near_window_drawdown`), so the
     finite-radius target term is accurate to ~1e-5 independent of ``n_per_step``. The far
-    convolution uses the exact cell-averaged source (:func:`leaky_volume`) and the exact
+    convolution uses the exact cell-averaged source (:func:`_leaky_volume`) and the exact
     cell-integrated kernel, and its remaining error is the cell-scale resolution of the
     point-source kernels near their peaks (``alpha^2 ~ dk`` for the nearest neighbours),
     which is second order in ``dk``: ~1e-3 at ``n_per_step=8`` and ~1e-4 at 16 for a 15 m
@@ -1127,7 +1132,7 @@ def _variable_kd_rate_drawdown_kd_grid(
 
     kappa_nodes = cumulative_kd
     # Regime, grid step, node count and leakage-memory length (single source of truth).
-    regime, dk, n_grid, mem_cells = _kd_grid_regime(beta, time_days, kappa_nodes, n_per_step)
+    _regime, dk, n_grid, mem_cells = _kd_grid_regime(beta, time_days, kappa_nodes, n_per_step)
     if n_grid > _KD_GRID_MAX_NODES:
         raise ValueError(
             f"kd_grid would allocate {n_grid} grid nodes (cap {_KD_GRID_MAX_NODES}). The grid step is "
@@ -1135,42 +1140,11 @@ def _variable_kd_rate_drawdown_kd_grid(
             "grid; resample to a more regular index before calling the kd_grid method."
         )
     node = np.arange(n_grid) * dk
-    cumulative_kd_fun = kd_fun.antiderivative()
-
-    # Exact node times: invert K(t) at the grid nodes with two Newton steps on the PCHIP
-    # antiderivative (the linear-interpolation guess is off by O(dt^2 kD'/kD), so two steps
-    # reach round-off). Nodes past the last data node map to t_last, so their cells carry no
-    # source.
-    node_time = np.interp(node, kappa_nodes, time_days)
-    for _ in range(2):
-        node_time = np.clip(
-            node_time - (cumulative_kd_fun(node_time) - node) / kd_fun(node_time),
-            t0,
-            t_last,
-        )
-
-    def leaky_volume(t_lo, t_hi, t_ref):
-        """``int_{t_lo}^{t_hi} q(t) exp(beta^2 (t - t_ref)) dt``, exact for piecewise-constant ``q``.
-
-        The pumped volume weighted by the leakage growth factor. Cell integrals of the
-        source density ``q / kD exp(beta^2 (t - t_ref))`` over cumulative kD are exactly this
-        (``d kappa / kD = d tau``), so the far convolution sees the exact cell-averaged source
-        rather than a midpoint sample (the data-interval boundaries inside a cell are honoured).
-        Arrays broadcast; the pieces are summed per overlapped data interval. Callers keep
-        ``t_hi`` at or below ``t_ref`` plus one step so the growth factor stays bounded.
-        """
-        t_lo, t_hi, t_ref = np.broadcast_arrays(t_lo, t_hi, t_ref)
-        j_lo = np.clip(np.searchsorted(time_days, t_lo, side="right") - 1, 0, nt - 2)
-        j_hi = np.clip(np.searchsorted(time_days, t_hi, side="right") - 1, 0, nt - 2)
-        j = j_lo[..., None] + np.arange(int((j_hi - j_lo).max()) + 1)
-        covered = j <= j_hi[..., None]
-        j = np.minimum(j, nt - 2)
-        piece_lo = np.maximum(time_days[j], t_lo[..., None])
-        piece_hi = np.minimum(time_days[j + 1], t_hi[..., None])
-        length = np.where(covered, np.maximum(piece_hi - piece_lo, 0.0), 0.0)
-        return (q_interval[j] * np.exp(beta2 * (piece_lo - t_ref[..., None])) * np.expm1(beta2 * length)).sum(
-            -1
-        ) / beta2
+    node_time = _invert_cumulative_kd(node, kappa_nodes, time_days, kd_fun, cumulative_kd_fun)
+    # Target i sits between grid nodes n_floor and n_floor + 1 at fraction frac.
+    n_floor = np.clip(np.floor(kappa_nodes / dk).astype(np.int64), 0, n_grid - 1)
+    n_ceil = np.minimum(n_floor + 1, n_grid - 1)
+    frac = (kappa_nodes - node[n_floor]) / dk
 
     near_cells = near_steps * n_per_step
     # Only the finite-radius target term (the well of interest, at alpha^2 ==
@@ -1184,12 +1158,11 @@ def _variable_kd_rate_drawdown_kd_grid(
 
     # Combined edge-aligned cell-integrated kernel = multiplicity-weighted sum over
     # terms of (1/4pi) E1(alpha^2 / w), differenced across cells (moment expansion for the
-    # smooth terms, direct E1 near each peak). Truncated past the leakage memory (blocked
-    # path). The near-treated terms enter only beyond the near window, w >= w_near (the
-    # window itself is added exactly below).
+    # smooth terms, direct E1 near each peak), truncated past the leakage memory. The
+    # near-treated terms enter only beyond the near window, w >= w_near (the window itself
+    # is added exactly below).
     far = np.zeros(nt)
-    long_memory = regime == "long_memory"
-    kernel_len = n_grid if long_memory else min(n_grid, near_cells + mem_cells + 2)
+    kernel_len = min(n_grid, near_cells + mem_cells + 2)
     kernel_nodes = np.arange(kernel_len + 1) * dk
     point_mults, point_alpha2s = mults[~near_term_mask], alpha2s[~near_term_mask]
     near_mults, near_alpha2s = mults[near_term_mask], alpha2s[near_term_mask]
@@ -1199,17 +1172,21 @@ def _variable_kd_rate_drawdown_kd_grid(
     if near_term_mask.any():
         near_e1 = _kd_grid_point_source_kernel(near_mults, near_alpha2s, np.maximum(kernel_nodes, w_near))
         far_kernel += np.diff(near_e1) * _INV_4PI
+        boundary_time = _invert_cumulative_kd(
+            np.maximum(kappa_nodes - w_near, 0.0), kappa_nodes, time_days, kd_fun, cumulative_kd_fun
+        )
         far += _kd_grid_boundary_cell_correction(
             near_mults,
             near_alpha2s,
-            kd_fun,
-            cumulative_kd_fun,
-            leaky_volume,
+            q_interval,
             time_days,
-            kappa_nodes,
+            beta2,
             node_time,
-            dk,
-            near_cells,
+            boundary_time,
+            n_floor,
+            frac,
+            dk=dk,
+            near_cells=near_cells,
         )
         # Near window: exact integral over (K_i - w_near, K_i] for the near-treated terms.
         near = _variable_kd_near_window_drawdown(
@@ -1222,54 +1199,109 @@ def _variable_kd_rate_drawdown_kd_grid(
             cumulative_kd_fun,
             kappa_nodes,
             w_near=w_near,
-            n_sub=min(n_per_step, _KD_GRID_NEAR_SUBSTEPS),
+            n_sub=_KD_GRID_NEAR_SUBSTEPS,
             near_steps=near_steps,
         )
 
-    # Exact cell-averaged source, referenced to each cell's own end so no factor overflows;
-    # a block re-references it to its end time with a decaying factor.
-    cell_volume = leaky_volume(node_time[:-1], node_time[1:], node_time[1:]) / dk
-    if long_memory:
-        source = cell_volume * np.exp(beta2 * (node_time[1:] - t_last))
-        c_far = np.r_[0.0, fftconvolve(source, far_kernel)[: n_grid - 1]]
-        far += np.exp(-beta2 * (time_days - t_last)) * np.interp(kappa_nodes, node, c_far)
-    else:
-        n_blocks = int(np.ceil(beta2 * (t_last - t0) / _KD_GRID_BLOCK_SPAN))
-        block_edges = np.linspace(t0, t_last, n_blocks + 1)
-        memory_days = _KD_GRID_MEMORY_DECAY / beta2
-        # Each target belongs to exactly one block, (lo_t, hi_t] up to round-off.
-        block_of = np.clip(np.searchsorted(block_edges, time_days - 1e-9, side="left") - 1, 0, n_blocks - 1)
-        for b in range(n_blocks):
-            lo_t, hi_t = block_edges[b], block_edges[b + 1]
-            targets = np.flatnonzero(block_of == b)
-            if targets.size == 0:
-                continue
-            # Source cells ending after the memory start and starting before the block end;
-            # the growing exp(+beta^2 t) factor is referenced to the block end.
-            s0 = max(int(np.searchsorted(node_time, lo_t - memory_days, side="right")) - 1, 0)
-            s1 = min(int(np.searchsorted(node_time, hi_t, side="left")), n_grid - 1)
-            if s1 <= s0:
-                continue
-            source = cell_volume[s0:s1] * np.exp(beta2 * (node_time[s0 + 1 : s1 + 1] - hi_t))
+    # Exact cell-averaged source q / kD exp(beta^2 (tau - t_ref)) over each cell, referenced to
+    # the cell's own end so no factor overflows. dk is at most the smallest cumulative-kD step,
+    # so a cell holds at most one data node and the leaky volume has at most two pieces.
+    j_node = np.clip(np.searchsorted(time_days, node_time, side="right") - 1, 0, nt - 2)
+    j_lo, j_hi = j_node[:-1], j_node[1:]
+    t_lo, t_hi = node_time[:-1], node_time[1:]
+    split = j_hi > j_lo
+    t_split = np.where(split, time_days[j_hi], t_hi)
+    cell_volume = q_interval[j_lo] * np.exp(beta2 * (t_lo - t_hi)) * np.expm1(beta2 * (t_split - t_lo))
+    cell_volume += np.where(
+        split, q_interval[j_hi] * np.exp(beta2 * (t_split - t_hi)) * np.expm1(beta2 * (t_hi - t_split)), 0.0
+    )
+    cell_volume /= beta2 * dk
+
+    # Blocks of at most _KD_GRID_BLOCK_SPAN / beta^2 days (a single block in the long-memory
+    # regime): each re-references its sources to the block end with a decaying factor,
+    # convolves them with the far kernel and interpolates to its targets between grid nodes.
+    n_blocks = int(np.ceil(beta2 * (t_last - t0) / _KD_GRID_BLOCK_SPAN))
+    block_edges = np.linspace(t0, t_last, n_blocks + 1)
+    memory_days = _KD_GRID_MEMORY_DECAY / beta2
+    # Each target belongs to exactly one block, (lo_t, hi_t] up to round-off; targets are
+    # sorted, so each block's targets are a slice.
+    block_of = np.clip(np.searchsorted(block_edges, time_days - 1e-9, side="left") - 1, 0, n_blocks - 1)
+    block_first = np.searchsorted(block_of, np.arange(n_blocks + 1))
+    # Source cells ending after the memory start and starting before the block end.
+    source_first = np.maximum(np.searchsorted(node_time, block_edges[:-1] - memory_days, side="right") - 1, 0)
+    source_end = np.minimum(np.searchsorted(node_time, block_edges[1:], side="left"), n_grid - 1)
+    # conv[k] holds grid node k + 1 + s0; nodes outside it get no far part.
+    node_pair = np.stack([n_floor, n_ceil]) - 1
+    c_pair = np.zeros((2, nt))
+    for b in range(n_blocks):
+        lo, hi = block_first[b], block_first[b + 1]
+        s0, s1 = int(source_first[b]), int(source_end[b])
+        if lo == hi or s1 <= s0:
+            continue
+        source = cell_volume[s0:s1] * np.exp(beta2 * (node_time[s0 + 1 : s1 + 1] - block_edges[b + 1]))
+        if min(source.size, far_kernel.size) <= _KD_GRID_DIRECT_CONV_MAX:
+            conv = np.convolve(source, far_kernel)
+        else:
             conv = fftconvolve(source, far_kernel)
-            kappa_t = kappa_nodes[targets]
-            n_floor = np.clip(np.floor(kappa_t / dk).astype(np.int64), 0, n_grid - 1)
-            n_ceil = np.clip(n_floor + 1, 0, n_grid - 1)
-            frac = (kappa_t - node[n_floor]) / dk
-            # conv[k] holds grid node k + 1 + s0; nodes outside it get no far part.
-            flat_idx = np.stack([n_floor, n_ceil]) - 1 - s0
-            inside = (flat_idx >= 0) & (flat_idx < conv.size)
-            c_floor, c_ceil = np.where(inside, conv[np.clip(flat_idx, 0, conv.size - 1)], 0.0)
-            c_far = c_floor * (1.0 - frac) + c_ceil * frac
-            far[targets] += np.exp(-beta2 * (time_days[targets] - hi_t)) * c_far
+        flat_idx = node_pair[:, lo:hi] - s0
+        inside = (flat_idx >= 0) & (flat_idx < conv.size)
+        c_pair[:, lo:hi] = np.where(inside, conv[np.clip(flat_idx, 0, conv.size - 1)], 0.0)
+    block_decay = np.exp(-beta2 * (time_days - block_edges[1:][block_of]))
+    far += block_decay * (c_pair[0] * (1.0 - frac) + c_pair[1] * frac)
 
     drawdown = near + far
     drawdown[0] = 0.0
     return drawdown
 
 
+def _invert_cumulative_kd(kappa, kappa_nodes, time_days, kd_fun, cumulative_kd_fun):
+    """Times at which the cumulative transmissivity ``K(t)`` reaches ``kappa``.
+
+    Two Newton steps on the PCHIP antiderivative from the linear-interpolation guess (off by
+    ``O(dt^2 kD' / kD)``) reach round-off. Values past the last data node map to its time.
+    """
+    t0, t_last = time_days[0], time_days[-1]
+    t = np.interp(kappa, kappa_nodes, time_days)
+    for _ in range(2):
+        t = np.clip(t - (cumulative_kd_fun(t) - kappa) / kd_fun(t), t0, t_last)
+    return t
+
+
+def _leaky_volume(t_lo, t_hi, t_ref, time_days, q_interval, beta2):
+    """``int_{t_lo}^{t_hi} q(t) exp(beta^2 (t - t_ref)) dt``, exact for piecewise-constant ``q``.
+
+    The pumped volume weighted by the leakage growth factor. Cell integrals of the source
+    density ``q / kD exp(beta^2 (t - t_ref))`` over cumulative kD are exactly this
+    (``d kappa / kD = d tau``), so data-interval boundaries inside a cell are honoured.
+    Arrays broadcast; the pieces are summed per overlapped data interval. Callers keep
+    ``t_hi`` at or below ``t_ref`` plus one step so the growth factor stays bounded.
+    """
+    nt = time_days.size
+    t_lo, t_hi, t_ref = np.broadcast_arrays(t_lo, t_hi, t_ref)
+    j_lo = np.clip(np.searchsorted(time_days, t_lo, side="right") - 1, 0, nt - 2)
+    j_hi = np.clip(np.searchsorted(time_days, t_hi, side="right") - 1, 0, nt - 2)
+    j = j_lo[..., None] + np.arange(int((j_hi - j_lo).max()) + 1)
+    covered = j <= j_hi[..., None]
+    j = np.minimum(j, nt - 2)
+    piece_lo = np.maximum(time_days[j], t_lo[..., None])
+    piece_hi = np.minimum(time_days[j + 1], t_hi[..., None])
+    length = np.where(covered, np.maximum(piece_hi - piece_lo, 0.0), 0.0)
+    return (q_interval[j] * np.exp(beta2 * (piece_lo - t_ref[..., None])) * np.expm1(beta2 * length)).sum(-1) / beta2
+
+
 def _kd_grid_boundary_cell_correction(
-    near_mults, near_alpha2s, kd_fun, cumulative_kd_fun, leaky_volume, time_days, kappa_nodes, node_time, dk, near_cells
+    near_mults,
+    near_alpha2s,
+    q_interval,
+    time_days,
+    beta2,
+    node_time,
+    boundary_time,
+    n_floor,
+    frac,
+    *,
+    dk,
+    near_cells,
 ):
     """Exact-minus-interpolated far part of the target term's near-window boundary cell, per target.
 
@@ -1277,31 +1309,23 @@ def _kd_grid_boundary_cell_correction(
     target term that weights the boundary cell ``[m_b dk, (m_b + 1) dk]``
     (``m_b = n_floor - near_cells``) by ``frac * kernel[near_cells]`` with its full-cell mean
     source, whereas the far part of a target at ``K_i`` covers only ``[m_b dk, K_i - w_near]``
-    of it, with that part's own mean source; a pumping-rate jump inside the cell makes the two
-    differ at first order in ``dk``. Both are closed forms (``leaky_volume``), so the
-    interpolated piece is replaced by the exact one. Referenced to ``t_i`` the correction is
-    block-independent. Every other cell of the target term is smooth on the cell scale
-    (``w >= w_near``), so plain interpolation is second order there.
+    of it (ending at ``boundary_time``), with that part's own mean source; a pumping-rate jump
+    inside the cell makes the two differ at first order in ``dk``. Both are closed forms
+    (:func:`_leaky_volume`), so the interpolated piece is replaced by the exact one. Referenced
+    to ``t_i`` the correction is block-independent. Every other cell of the target term is
+    smooth on the cell scale (``w >= w_near``), so plain interpolation is second order there.
     """
-    n_grid = node_time.size
     w_near = near_cells * dk
-    t0, t_last = time_days[0], time_days[-1]
-    boundary_kappa = np.maximum(kappa_nodes - w_near, 0.0)
-    boundary_time = np.interp(boundary_kappa, kappa_nodes, time_days)
-    for _ in range(2):
-        step = (cumulative_kd_fun(boundary_time) - boundary_kappa) / kd_fun(boundary_time)
-        boundary_time = np.clip(boundary_time - step, t0, t_last)
-    n_floor = np.floor(kappa_nodes / dk).astype(np.int64)
-    frac = kappa_nodes / dk - n_floor
     width = frac * dk
     boundary_cell = n_floor - near_cells
     has_boundary = (boundary_cell >= 0) & (width > 0.0)
-    cell_lo = np.clip(boundary_cell, 0, n_grid - 1)
+    # boundary_cell <= n_grid - 1 - near_cells, so only the lower clamp can bind.
+    cell_lo = np.maximum(boundary_cell, 0)
     lo_time = node_time[cell_lo]
-    hi_time = node_time[np.minimum(cell_lo + 1, n_grid - 1)]
+    hi_time = node_time[cell_lo + 1]
     safe_width = np.where(width > 0.0, width, 1.0)
-    part_mean = leaky_volume(lo_time, boundary_time, time_days) / safe_width
-    cell_mean = leaky_volume(lo_time, hi_time, time_days) / dk
+    part_mean = _leaky_volume(lo_time, boundary_time, time_days, time_days, q_interval, beta2) / safe_width
+    cell_mean = _leaky_volume(lo_time, hi_time, time_days, time_days, q_interval, beta2) / dk
     near_kernel_edges = _kd_grid_point_source_kernel(near_mults, near_alpha2s, np.array([w_near, w_near + dk]))
     part_kernel = _kd_grid_point_source_kernel(near_mults, near_alpha2s, w_near + width) - near_kernel_edges[0]
     cell_kernel = near_kernel_edges[1] - near_kernel_edges[0]
@@ -1336,7 +1360,7 @@ def _variable_kd_near_window_drawdown(
     ``M1 = G(w_lo) - G(w_hi) - w_lo (F(w_lo) - F(w_hi))`` its first moment, both from
     :func:`_kd_antiderivative_well_function`. Clipping ``w_hi`` at ``w_near`` keeps the same
     linearisation. The remaining error is second order in the sub-step (curvature of ``K``
-    and of ``1 / kD``), ~1e-6 with seasonal kD at two sub-steps. The near window spans at
+    and of ``1 / kD``), ~1e-5 with seasonal kD at two sub-steps. The near window spans at
     most ``near_steps`` data intervals because ``w_near`` is ``near_steps`` times the smallest
     cumulative-kD step.
     """
@@ -1351,10 +1375,10 @@ def _variable_kd_near_window_drawdown(
     kappa_sub = cumulative_kd_fun(tau_sub)
     density_sub = 1.0 / kd_fun(tau_sub)
     n_sub_total = tau_sub.size - 1
-    kd_seg = np.diff(kappa_sub) / np.diff(tau_sub)
-    density_slope = -np.diff(density_sub) / np.diff(kappa_sub)  # d(1/kD)/dw, w running backwards
+    d_kappa_sub = np.diff(kappa_sub)
+    density_slope = -np.diff(density_sub) / d_kappa_sub  # d(1/kD)/dw, w running backwards
     q_sub = np.repeat(q_interval, n_sub)
-    leakage_sub = beta2 / kd_seg
+    leakage_sub = beta2 / (d_kappa_sub / np.diff(tau_sub))
 
     near = np.zeros(nt)
     lags = np.arange(n_lags)
@@ -1371,13 +1395,15 @@ def _variable_kd_near_window_drawdown(
         valid &= w_lo < w_near
         leakage = leakage_sub[seg]
         prefactor = q_sub[seg] * np.exp(-beta2 * (time_days[lo:hi, None] - tau_sub[seg + 1]) + leakage * w_lo)
+        density_hi = density_sub[seg + 1]
+        slope = density_slope[seg]
+        edges_w = np.stack([w_lo, w_hi])
         d_well = np.zeros(seg.shape)
         for mult, alpha2 in zip(mults.tolist(), alpha2s.tolist(), strict=True):
-            well_lo, moment_lo = _kd_antiderivative_well_function(w_lo, alpha2, leakage)
-            well_hi, moment_hi = _kd_antiderivative_well_function(w_hi, alpha2, leakage)
+            (well_lo, well_hi), (moment_lo, moment_hi) = _kd_antiderivative_well_function(edges_w, alpha2, leakage)
             d_well_term = well_lo - well_hi
             d_moment = moment_lo - moment_hi - w_lo * d_well_term
-            d_well += mult * (density_sub[seg + 1] * d_well_term + density_slope[seg] * d_moment)
+            d_well += mult * (density_hi * d_well_term + slope * d_moment)
         near[lo:hi] = np.where(valid, prefactor * d_well, 0.0).sum(axis=1)
     return near
 
