@@ -1,3 +1,5 @@
+from itertools import pairwise
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -207,6 +209,39 @@ def test_variable_kd_steady_initial_condition_matches_steady_limit(hantush_case)
     np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-8)
 
 
+@pytest.mark.parametrize("leakage_resistance", [200.0, 5000.0])
+def test_variable_kd_initial_condition_resolves_distant_image_well(leakage_resistance):
+    # A distant (image) well's pre-period drawdown integrand exp(-alpha^2/k - b (k - K_i)) / k
+    # peaks near k = alpha^2, far above the lower limit K_i. A single adaptive quad over
+    # [K_i, inf) can miss that peak; the reference splits the range at geometric breakpoints.
+    index = pd.date_range("2020-01-01", periods=60, freq="12h")
+    time_days = np.asarray((index - index[0]) / pd.Timedelta("1D"), dtype=float)
+    kD = 100.0 * (1.0 + 0.2 * np.sin(2.0 * np.pi * time_days / 365.0))
+    storage = 0.2
+    alpha = (800.0**2 * storage / 4.0) ** 0.5  # image well 800 m away
+    beta = (1.0 / (leakage_resistance * storage)) ** 0.5
+    initial_q = 1000.0
+
+    actual = hantush_variable_kd(alpha, beta, kD, index=index, Q_obs=np.zeros(index.size), initial_condition=initial_q)
+
+    cumulative_kd = PchipInterpolator(time_days, kD).antiderivative()(time_days)
+    b = beta * beta / kD[0]
+    expected = np.empty(index.size)
+    expected[0] = initial_q / (4.0 * np.pi * kD[0]) * 2.0 * k0(2.0 * alpha * beta / np.sqrt(kD[0]))
+    for i in range(1, index.size):
+        lower = cumulative_kd[i]
+        edges = np.geomspace(lower, lower + 60.0 / b + alpha * alpha * 100.0, 60)
+
+        def integrand(k, lower=lower):
+            return np.exp(-alpha * alpha / k - b * (k - lower)) / k
+
+        integral = sum(quad(integrand, lo, hi, epsabs=1e-16, epsrel=1e-12, limit=200)[0] for lo, hi in pairwise(edges))
+        integral += quad(integrand, edges[-1], np.inf, epsabs=1e-16, epsrel=1e-12)[0]
+        expected[i] = initial_q * np.exp(-beta * beta * time_days[i]) / (4.0 * np.pi * kD[0]) * integral
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0.0)
+
+
 def test_variable_kd_response_to_kd_step_is_not_instantaneous(hantush_case):
     index = hantush_case["index"][:60]
     q_obs = hantush_case["q_obs"][:60]
@@ -349,13 +384,24 @@ def test_kd_grid_matches_quad_rate_part_variable_kd_and_flow():
     beta = (1.0 / (leakage * storage)) ** 0.5
 
     fast = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="kd_grid",
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="kd_grid",
     )
     reference = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="quad",
-        quad_epsabs=1e-12, quad_epsrel=1e-11,
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="quad",
+        quad_epsabs=1e-12,
+        quad_epsrel=1e-11,
     )
     np.testing.assert_allclose(fast, reference, rtol=3e-3, atol=1e-6)
 
@@ -365,15 +411,27 @@ def test_kd_grid_refines_toward_quad_with_resolution():
     alpha = (0.2**2 * 0.2 / 4.0) ** 0.5
     beta = (1.0 / (200.0 * 0.2)) ** 0.5
     reference = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="quad",
-        quad_epsabs=1e-12, quad_epsrel=1e-11,
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="quad",
+        quad_epsabs=1e-12,
+        quad_epsrel=1e-11,
     )
 
     def max_rel(n_per_step):
         fast = hantush_variable_kd(
-            alpha, beta, kD, index=index, Q_obs=q_obs,
-            initial_condition="zero", integration_method="kd_grid", n_per_step=n_per_step,
+            alpha,
+            beta,
+            kD,
+            index=index,
+            Q_obs=q_obs,
+            initial_condition="zero",
+            integration_method="kd_grid",
+            n_per_step=n_per_step,
         )
         return np.max(np.abs(fast - reference) / np.maximum(np.abs(reference), 1e-9))
 
@@ -388,13 +446,24 @@ def test_kd_grid_matches_quad_across_leakage(leakage_resistance):
     beta = (1.0 / (leakage_resistance * storage)) ** 0.5
 
     fast = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="kd_grid",
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="kd_grid",
     )
     reference = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="quad",
-        quad_epsabs=1e-12, quad_epsrel=1e-11,
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="quad",
+        quad_epsabs=1e-12,
+        quad_epsrel=1e-11,
     )
     assert np.isfinite(fast).all()
     np.testing.assert_allclose(fast, reference, rtol=5e-3, atol=1e-6)
@@ -413,12 +482,22 @@ def test_kd_grid_blocking_stays_finite_and_accurate_over_long_span():
     assert beta**2 * span_days > 17.0  # blocking is exercised
 
     fast = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="kd_grid",
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="kd_grid",
     )
     reference = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="gauss",
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="gauss",
     )
     assert np.isfinite(fast).all()
     np.testing.assert_allclose(fast, reference, rtol=5e-3, atol=1e-5)
@@ -427,7 +506,8 @@ def test_kd_grid_blocking_stays_finite_and_accurate_over_long_span():
 def test_kd_grid_matches_pastas_hantush_well_model_constant_kd(hantush_case):
     HantushWellModel = pytest.importorskip("pastas.rfunc").HantushWellModel
     fast = hantush_variable_kd(
-        hantush_case["alpha"], hantush_case["beta"],
+        hantush_case["alpha"],
+        hantush_case["beta"],
         np.full(hantush_case["index"].size, hantush_case["kD"]),
         **_variable_kd_pextra(hantush_case["index"], hantush_case["q_obs"]),
         integration_method="kd_grid",
@@ -445,12 +525,11 @@ def test_kd_grid_matches_pastas_hantush_well_model_constant_kd(hantush_case):
     ("leakage_resistance", "n_per_step", "rtol"),
     [(5.0, 16, 1.5e-2), (3.0, 16, 2.0e-2), (8.0, 8, 1.6e-2)],
 )
-def test_kd_grid_banded_regime_matches_quad(leakage_resistance, n_per_step, rtol):
-    # Very leaky aquifers drive beta high so kd_grid takes its dedicated "banded"
-    # direct-near-window branch (the far convolution is skipped). No other kd_grid test
-    # reaches it. The branch is first-order in dk, so its accuracy is looser than the
-    # long_memory/blocked paths; this asserts the branch actually runs (via the public
-    # regime classifier) AND bounds its error against the quad reference.
+def test_kd_grid_very_leaky_matches_quad(leakage_resistance, n_per_step, rtol):
+    # Very leaky aquifers drive beta high: the leakage memory is a few cells and kd_grid
+    # runs many short blocks. The leakage factoring at cell midpoints is first-order in dk,
+    # so the error bound is looser than for moderate leakage; this asserts the blocked path
+    # runs (via the public regime classifier) AND bounds its error against quad.
     index, kD, q_obs = _variable_kd_synthetic_case(periods=120)
     storage = 0.2
     alpha = (0.2**2 * storage / 4.0) ** 0.5
@@ -460,24 +539,37 @@ def test_kd_grid_banded_regime_matches_quad(leakage_resistance, n_per_step, rtol
     cumulative_kd = PchipInterpolator(time_days, kD).antiderivative()(time_days)
     cumulative_kd -= cumulative_kd[0]
     regime, _dk, _n_grid, _mem_cells = _kd_grid_regime(beta, time_days, cumulative_kd, n_per_step)
-    assert regime == "banded"
+    assert regime == "blocked"
 
     fast = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="kd_grid", n_per_step=n_per_step,
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="kd_grid",
+        n_per_step=n_per_step,
     )
     reference = hantush_variable_kd(
-        alpha, beta, kD, index=index, Q_obs=q_obs,
-        initial_condition="zero", integration_method="quad",
-        # The kd_grid banded error bounded here is ~1e-2, so a 1e-9 reference is ample
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="quad",
+        # The kd_grid error bounded here is ~1e-2, so a 1e-9 reference is ample
         # and far cheaper than 1e-11.
-        quad_epsabs=1e-10, quad_epsrel=1e-9,
+        quad_epsabs=1e-10,
+        quad_epsrel=1e-9,
     )
     assert np.isfinite(fast).all()
     np.testing.assert_allclose(fast, reference, rtol=rtol, atol=1e-6)
 
 
-def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch):
+@pytest.mark.parametrize(("leakage", "expected_regime"), [(200.0, "long_memory"), (3.0, "blocked")])
+def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch, leakage, expected_regime):
     # Only the well whose head is of interest carries a finite well radius: its term sits
     # at alpha^2 = r_well^2 * S / 4 and gets the exact near-window integral. Every other
     # well in the series and every mirror well is an infinitely small point source that
@@ -497,7 +589,7 @@ def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch):
 
     monkeypatch.setattr(funs, "_kd_antiderivative_well_function", spy)
 
-    storage, well_radius, leakage = 0.2, 0.2, 200.0  # leakage 200 d -> long_memory, not banded
+    storage, well_radius = 0.2, 0.2
     alpha = (well_radius**2 * storage / 4.0) ** 0.5
     beta = (1.0 / (leakage * storage)) ** 0.5
     target_alpha2 = alpha * alpha
@@ -515,7 +607,7 @@ def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch):
     cumulative_kd = PchipInterpolator(time_days, kD).antiderivative()(time_days)
     cumulative_kd -= cumulative_kd[0]
     regime, *_ = _kd_grid_regime(beta, time_days, cumulative_kd, 8)
-    assert regime == "long_memory"  # the banded regime intentionally keeps every term near
+    assert regime == expected_regime  # also holds for very leaky aquifers
 
     objective(
         [alpha, beta],
