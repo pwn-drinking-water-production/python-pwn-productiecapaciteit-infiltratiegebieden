@@ -427,23 +427,33 @@ def transient_drawdown_for_coefficients(
     series_growth_per_m3=0.0,
     target_well_index=None,
     initial_condition=FIT_INITIAL_CONDITION,
+    aquifer_cache=None,
 ):
-    """Modeled aquifer drawdown = leaky-aquifer Hantush + series head loss, as positive meters."""
-    trial = with_transient_parameters(
-        df_a_wvpt, kd_ref_m2_per_d, leakage_resistance_d, series_growth_per_m3
-    )
-    aquifer = -trial.wvpt.dp_model(
-        dfm.index,
-        dfm.Q,
-        ci.nput,
-        ci.dx_tussenputten,
-        ci.r_mirrorwel,
-        target_well_index=target_well_index,
-        initial_condition=initial_condition,
-        # Observations are 12 h interval means labeled at the right edge
-        # (resample label="right"); apply each mean on the interval it covers.
-        flow_label="right",
-    )
+    """Modeled aquifer drawdown = leaky-aquifer Hantush + series head loss, as positive meters.
+
+    The Hantush part depends only on ``(kd_ref_m2_per_d, leakage_resistance_d)``, not on the
+    series growth. Pass the same ``aquifer_cache`` dict for calls that share ``dfm``, ``df_a_wvpt``,
+    ``ci``, ``target_well_index`` and ``initial_condition`` (one fit) to reuse it across growth values.
+    """
+    trial = with_transient_parameters(df_a_wvpt, kd_ref_m2_per_d, leakage_resistance_d, series_growth_per_m3)
+    key = (kd_ref_m2_per_d, leakage_resistance_d)
+    if aquifer_cache is not None and key in aquifer_cache:
+        aquifer = aquifer_cache[key]
+    else:
+        aquifer = -trial.wvpt.dp_model(
+            dfm.index,
+            dfm.Q,
+            ci.nput,
+            ci.dx_tussenputten,
+            ci.r_mirrorwel,
+            target_well_index=target_well_index,
+            initial_condition=initial_condition,
+            # Observations are 12 h interval means labeled at the right edge
+            # (resample label="right"); apply each mean on the interval it covers.
+            flow_label="right",
+        )
+        if aquifer_cache is not None:
+            aquifer_cache[key] = aquifer
     return (aquifer + series_head_loss(trial, dfm)).rename("wvpt_drawdown")
 
 
@@ -518,6 +528,7 @@ def fit_transient_coefficients(  # noqa: C901
     observed_scale = np.nanmax(np.abs(observed[valid]))
     penalty = max(float(observed_scale), 1.0) * 1.0e6
     model_cache = {}
+    aquifer_cache = {}  # Hantush part per (kd_ref, leakage); the growth-only Jacobian column reuses it
     best_fit = {"cost": np.inf, "params": None, "modeled": None}
     last_model_error = {"message": ""}
 
@@ -550,6 +561,7 @@ def fit_transient_coefficients(  # noqa: C901
                 series_growth_per_m3=growth,
                 target_well_index=target_well_index,
                 initial_condition=initial_condition,
+                aquifer_cache=aquifer_cache,
             )
         except MODEL_FAILURE_EXCEPTIONS as exc:
             last_model_error["message"] = str(exc)
@@ -634,9 +646,7 @@ def fit_transient_coefficients(  # noqa: C901
         modeled = best_fit["modeled"]
 
     residuals = modeled.to_numpy(dtype=float) - observed
-    coefficients = transient_coefficients_from_sheet(
-        with_transient_parameters(df_a_wvpt, kd_ref, leakage, growth)
-    )
+    coefficients = transient_coefficients_from_sheet(with_transient_parameters(df_a_wvpt, kd_ref, leakage, growth))
     coefficients[TRANSIENT_MODIFIED_KEY] = pd.Timestamp.now()
 
     return {
@@ -806,9 +816,7 @@ def main(strangen=None):
         try:
             source_sheet = source_sheets.get(strang, default_transient_coefficients())
             seed = force_physical_constants(transient_coefficients_from_sheet(source_sheet))
-            dfm = load_observations(
-                strang, ci, filter_sheets[strang], series_datum=seed["series_datum"]
-            )
+            dfm = load_observations(strang, ci, filter_sheets[strang], series_datum=seed["series_datum"])
             # The reference "high flow" for the 0.5 m baseline is the 95th percentile of the
             # sanitized flow, recomputed and stored each run.
             seed["series_flow_ref_m3_per_h"] = float(

@@ -168,6 +168,39 @@ def test_transient_drawdown_for_coefficients_uses_zero_initial_condition(monkeyp
     np.testing.assert_allclose(actual.to_numpy(), 0.0)
 
 
+def test_transient_drawdown_aquifer_cache_reuses_hantush_across_growth(monkeypatch):
+    # The Hantush part depends on (kD_ref, leakage) only; with a shared cache a growth-only
+    # change must not rerun it, and the result must equal the uncached evaluation exactly.
+    index = pd.date_range("2020-01-01", periods=40, freq="12h")
+    dfm = pd.DataFrame(
+        {"Q": np.linspace(5.0, 15.0, index.size), "cumulative_volume_m3": np.linspace(0.0, 2.0e4, index.size)},
+        index=index,
+    )
+    coefficients = default_transient_coefficients(series_flow_ref_m3_per_h=16.0)
+    ci = _ci()
+    calls = []
+    original_objective = accessor_module.objective
+
+    def counting_objective(*args, **kwargs):
+        calls.append(1)
+        return original_objective(*args, **kwargs)
+
+    monkeypatch.setattr(accessor_module, "objective", counting_objective)
+
+    cache = {}
+    cached = [
+        transient_drawdown_for_coefficients(
+            90.0, 150.0, dfm, coefficients, ci, series_growth_per_m3=g, aquifer_cache=cache
+        )
+        for g in (0.0, 2.0e-5)
+    ]
+    assert len(calls) == 1
+    for g, actual in zip((0.0, 2.0e-5), cached, strict=True):
+        expected = transient_drawdown_for_coefficients(90.0, 150.0, dfm, coefficients, ci, series_growth_per_m3=g)
+        np.testing.assert_array_equal(actual.to_numpy(), expected.to_numpy())
+    assert not np.array_equal(cached[0].to_numpy(), cached[1].to_numpy())  # growth still acts
+
+
 def test_fit_transient_coefficients_recovers_synthetic_values():
     true_kd = 80.0
     true_leakage = 150.0
@@ -658,9 +691,7 @@ def test_fit_growth_defaults_to_zero_without_throughput():
     flow = np.zeros(index.size)
     flow[5:] = 10.0
     truth = default_transient_coefficients(kd_ref_m2_per_d=80.0, leakage_resistance_d=150.0)
-    observed = transient_drawdown_for_coefficients(
-        80.0, 150.0, pd.DataFrame({"Q": flow}, index=index), truth, ci
-    )
+    observed = transient_drawdown_for_coefficients(80.0, 150.0, pd.DataFrame({"Q": flow}, index=index), truth, ci)
     dfm = pd.DataFrame({"Q": flow, "drawdown_aquifer": observed.to_numpy(dtype=float)}, index=index)
     seed = truth.copy()
     seed["kD_ref_m2_per_d"] = 150.0
@@ -739,9 +770,7 @@ def test_series_baseline_present_at_zero_growth():
     index = pd.date_range("2015-01-01", periods=20, freq="10D")
     flow = np.full(index.size, 12.0)
     volume = np.linspace(0.0, 5.0e4, index.size)
-    coeff = default_transient_coefficients(
-        series_dp_ref_m=0.5, series_flow_ref_m3_per_h=16.0, series_growth_per_m3=0.0
-    )
+    coeff = default_transient_coefficients(series_dp_ref_m=0.5, series_flow_ref_m3_per_h=16.0, series_growth_per_m3=0.0)
     dfm = pd.DataFrame({"Q": flow, "cumulative_volume_m3": volume}, index=index)
 
     hl = report.series_head_loss(coeff, dfm)
@@ -750,12 +779,8 @@ def test_series_baseline_present_at_zero_growth():
 
     # The integrated model with the baseline exceeds the volume-less model by exactly the baseline.
     with_baseline = transient_drawdown_for_coefficients(80.0, 150.0, dfm, coeff, ci)
-    no_series = transient_drawdown_for_coefficients(
-        80.0, 150.0, pd.DataFrame({"Q": flow}, index=index), coeff, ci
-    )
-    np.testing.assert_allclose(
-        (with_baseline - no_series).to_numpy(), 0.5 / 16.0 * flow, rtol=1e-10
-    )
+    no_series = transient_drawdown_for_coefficients(80.0, 150.0, pd.DataFrame({"Q": flow}, index=index), coeff, ci)
+    np.testing.assert_allclose((with_baseline - no_series).to_numpy(), 0.5 / 16.0 * flow, rtol=1e-10)
 
 
 def test_fit_rails_growth_to_positivity_bound():
@@ -774,13 +799,13 @@ def test_fit_rails_growth_to_positivity_bound():
     infeasible_growth = 5.0 * g_upper_pos
 
     truth = default_transient_coefficients(
-        kd_ref_m2_per_d=80.0, leakage_resistance_d=150.0,
-        series_flow_ref_m3_per_h=q95, series_growth_per_m3=infeasible_growth,
+        kd_ref_m2_per_d=80.0,
+        leakage_resistance_d=150.0,
+        series_flow_ref_m3_per_h=q95,
+        series_growth_per_m3=infeasible_growth,
     )
     dft = pd.DataFrame({"Q": flow, "cumulative_volume_m3": volume}, index=index)
-    observed = transient_drawdown_for_coefficients(
-        80.0, 150.0, dft, truth, ci, series_growth_per_m3=infeasible_growth
-    )
+    observed = transient_drawdown_for_coefficients(80.0, 150.0, dft, truth, ci, series_growth_per_m3=infeasible_growth)
     dfm = pd.DataFrame(
         {"Q": flow, "drawdown_aquifer": observed.to_numpy(dtype=float), "cumulative_volume_m3": volume},
         index=index,
@@ -801,27 +826,21 @@ def test_load_observations_aligns_signed_volume_onto_model_index(monkeypatch):
     # counts. Catches zeroing the alignment (which no other test reaches).
     index = pd.date_range("2015-01-01", periods=60, freq="h")
     flow = np.full(index.size, 10.0)
-    raw = pd.DataFrame(
-        {
-            "Datum": index,
-            "Q": flow,
-            "gws0": np.zeros(index.size),
-            "gws1": np.full(index.size, -2.0),
-            "pandpeil": np.zeros(index.size),
-        }
-    )
+    raw = pd.DataFrame({
+        "Datum": index,
+        "Q": flow,
+        "gws0": np.zeros(index.size),
+        "gws1": np.full(index.size, -2.0),
+        "pandpeil": np.zeros(index.size),
+    })
     # A mid-record block with non-positive aquifer drawdown -> dropped by the resample mask.
     raw.loc[20:30, "pandpeil"] = -5.0
     monkeypatch.setattr(report.pd, "read_feather", lambda fp: raw.copy())
     monkeypatch.setattr(report, "get_false_measurements", lambda *a, **k: np.zeros(index.size, dtype=bool))
 
-    dfm = report.load_observations(
-        "Q100", _ci(), _filter_coefficients(), series_datum=pd.Timestamp("2015-01-01")
-    )
+    dfm = report.load_observations("Q100", _ci(), _filter_coefficients(), series_datum=pd.Timestamp("2015-01-01"))
 
-    native = report.cumulative_extracted_volume_m3(
-        pd.Series(flow, index=index), datum=pd.Timestamp("2015-01-01")
-    )
+    native = report.cumulative_extracted_volume_m3(pd.Series(flow, index=index), datum=pd.Timestamp("2015-01-01"))
     expected = np.interp(
         dfm.index.astype("int64").to_numpy(),
         index.astype("int64").to_numpy(),
@@ -908,9 +927,7 @@ def test_series_and_aquifer_share_the_same_viscosity_factor():
     flow = dfm["Q"].to_numpy(dtype=float)
     volume = dfm["cumulative_volume_m3"].to_numpy(dtype=float)
     reference_temp_series = 0.5 / 16.0 * flow * (1.0 + 2.0e-5 * volume)  # strictly > 0
-    aquifer_viscratio = (
-        coeff.wvpt.kD_ref_model(index) / coeff.wvpt.kD_model(index)
-    ).to_numpy(dtype=float)
+    aquifer_viscratio = (coeff.wvpt.kD_ref_model(index) / coeff.wvpt.kD_model(index)).to_numpy(dtype=float)
 
     series_factor = report.series_head_loss(coeff, dfm).to_numpy() / reference_temp_series
     np.testing.assert_allclose(series_factor, aquifer_viscratio, rtol=1e-12)
