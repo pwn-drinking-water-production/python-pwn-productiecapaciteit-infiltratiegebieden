@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from scipy.integrate import quad
 from scipy.interpolate import PchipInterpolator
-from scipy.special import k0
+from scipy.special import exp1, k0, k1
 
 import productiecapaciteit.src.wvp_transient_funs as funs
 from productiecapaciteit.src.wvp_transient_funs import (
@@ -523,13 +523,13 @@ def test_kd_grid_matches_pastas_hantush_well_model_constant_kd(hantush_case):
 
 @pytest.mark.parametrize(
     ("leakage_resistance", "n_per_step", "rtol"),
-    [(5.0, 16, 1.5e-2), (3.0, 16, 2.0e-2), (8.0, 8, 1.6e-2)],
+    [(5.0, 16, 1e-3), (3.0, 16, 1e-3), (8.0, 8, 5e-3)],
 )
 def test_kd_grid_very_leaky_matches_quad(leakage_resistance, n_per_step, rtol):
     # Very leaky aquifers drive beta high: the leakage memory is a few cells and kd_grid
-    # runs many short blocks. The leakage factoring at cell midpoints is first-order in dk,
-    # so the error bound is looser than for moderate leakage; this asserts the blocked path
-    # runs (via the public regime classifier) AND bounds its error against quad.
+    # runs many short blocks. The near window integrates the leakage decay exactly, so the
+    # error is set by the far grid alone; this asserts the blocked path runs (via the public
+    # regime classifier) AND bounds its error against quad.
     index, kD, q_obs = _variable_kd_synthetic_case(periods=120)
     storage = 0.2
     alpha = (0.2**2 * storage / 4.0) ** 0.5
@@ -559,7 +559,7 @@ def test_kd_grid_very_leaky_matches_quad(leakage_resistance, n_per_step, rtol):
         Q_obs=q_obs,
         initial_condition="zero",
         integration_method="quad",
-        # The kd_grid error bounded here is ~1e-2, so a 1e-9 reference is ample
+        # The kd_grid error bounded here is >= 1e-3, so a 1e-9 reference is ample
         # and far cheaper than 1e-11.
         quad_epsabs=1e-10,
         quad_epsrel=1e-9,
@@ -583,9 +583,9 @@ def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch, leak
     seen_alpha2 = []
     original = funs._kd_antiderivative_well_function
 
-    def spy(kappa, alpha2):
+    def spy(kappa, alpha2, leakage_rate):
         seen_alpha2.append(float(alpha2))
-        return original(kappa, alpha2)
+        return original(kappa, alpha2, leakage_rate)
 
     monkeypatch.setattr(funs, "_kd_antiderivative_well_function", spy)
 
@@ -624,3 +624,98 @@ def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch, leak
 
     assert seen_alpha2, "the finite-radius near-window integrator was never exercised"
     assert max(seen_alpha2) <= target_alpha2 * (1.0 + 1e-9)
+
+
+@pytest.mark.parametrize("alpha2", [4.5e-3, 11.25, 4.5e3])
+@pytest.mark.parametrize("leakage_rate", [1e-5, 1e-3, 0.0455])
+def test_kd_antiderivative_well_function_matches_quadrature(alpha2, leakage_rate):
+    # The exact leaky segment integrals of the near window: the tails F = (1/4pi) int_kappa^inf
+    # exp(-alpha^2/w - c w)/w dw (the Hantush well function W(c kappa, 2 alpha sqrt(c))) and
+    # G = (1/4pi) int_kappa^inf exp(-alpha^2/w - c w) dw (its first moment). Checked against
+    # adaptive quadrature over both series branches (u >= x directly, u < x through the
+    # reflections) and the kappa = 0 limits 2 K0(rho) and rho K1(rho) / c.
+    kappa = np.array([0.0, 1e-6, 1e-3, 0.1, 1.0, 6.9, 55.0, 400.0, 2400.0])
+    well, moment = funs._kd_antiderivative_well_function(kappa, alpha2, leakage_rate)
+    rho = 2.0 * np.sqrt(leakage_rate * alpha2)
+    if rho >= funs._HANTUSH_RHO_MAX:
+        assert 2.0 * k0(rho) < 1e-11  # dropped terms are below the accuracy of the whole
+        np.testing.assert_array_equal(well, 0.0)
+        np.testing.assert_array_equal(moment, 0.0)
+        return
+
+    def tail(integrand, lower):
+        # Doubling breakpoints from the lower limit through the peak (w = alpha / sqrt(c)) and
+        # the decay, so no piece spans more than a factor two of the 1/w-like integrand. The
+        # neglected tail beyond 60 / c is below exp(-60) relative.
+        peak = np.sqrt(alpha2 / leakage_rate)
+        span_end = lower + 10.0 * peak + 60.0 / leakage_rate
+        n_edges = max(2, int(np.ceil(np.log2(span_end / lower))) + 1)
+        edges = np.geomspace(lower, span_end, n_edges)
+        return sum(quad(integrand, lo, hi, epsabs=1e-15, epsrel=1e-12, limit=200)[0] for lo, hi in pairwise(edges))
+
+    expected_well = np.empty_like(kappa)
+    expected_moment = np.empty_like(kappa)
+    for i, k in enumerate(kappa):
+        if k == 0.0:
+            expected_well[i] = 2.0 * k0(rho)
+            expected_moment[i] = rho * k1(rho) / leakage_rate
+            continue
+        expected_well[i] = tail(lambda w: np.exp(-alpha2 / w - leakage_rate * w) / w, k)
+        expected_moment[i] = tail(lambda w: np.exp(-alpha2 / w - leakage_rate * w), k)
+    np.testing.assert_allclose(well * 4.0 * np.pi, expected_well, rtol=1e-9, atol=1e-13)
+    np.testing.assert_allclose(moment * 4.0 * np.pi, expected_moment, rtol=1e-9, atol=1e-13)
+
+
+def test_kd_grid_point_source_kernel_matches_direct_e1():
+    # The far kernel sums E1(alpha^2 / w) over ~50 wells through a moment expansion
+    # (terms far from their peak) plus direct E1 near each peak; must equal the plain sum.
+    radius = 0.3
+    alpha = (radius**2 * 0.2 / 4.0) ** 0.5
+    multiwell, _ = build_multiwell_geometry(15.0, [(-2.0, 120.0), (1.0, 400.0)], 30, distance_scale=1.0 / radius)
+    terms = np.asarray(multiwell, dtype=float)
+    mults, alpha2s = terms[:, 0], (terms[:, 1] * alpha) ** 2
+    w = np.arange(20001) * 6.9
+    actual = funs._kd_grid_point_source_kernel(mults, alpha2s, w)
+    with np.errstate(divide="ignore"):
+        expected = exp1(alpha2s[None, :] / w[:, None]) @ mults
+    np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-12)
+
+
+def test_kd_grid_leakage_factoring_is_not_first_order():
+    # Regression: factoring the leakage decay exp(-beta^2 lag) at cell midpoints made the
+    # near window first-order in dk. The diagonal cell of the target well weights w ~ 1/w, so
+    # its leakage centroid sits far from the midpoint: at c = 1 d, n_per_step = 8 this gave an
+    # 8% error against quad (4% at n_per_step = 16). The exact Hantush-W segment integral
+    # removes it: the single-well error is then set by the near window's sub-step
+    # linearisation alone (~1e-5) at any n_per_step.
+    index, kD, q_obs = _variable_kd_synthetic_case(periods=120)
+    storage, leakage = 0.2, 1.0
+    alpha = (0.2**2 * storage / 4.0) ** 0.5
+    beta = (1.0 / (leakage * storage)) ** 0.5
+    reference = hantush_variable_kd(
+        alpha,
+        beta,
+        kD,
+        index=index,
+        Q_obs=q_obs,
+        initial_condition="zero",
+        integration_method="quad",
+        quad_epsabs=1e-10,
+        quad_epsrel=1e-9,
+    )
+
+    def max_rel(n_per_step):
+        fast = hantush_variable_kd(
+            alpha,
+            beta,
+            kD,
+            index=index,
+            Q_obs=q_obs,
+            initial_condition="zero",
+            integration_method="kd_grid",
+            n_per_step=n_per_step,
+        )
+        return np.max(np.abs(fast - reference)) / np.max(np.abs(reference))
+
+    assert max_rel(8) < 1e-4
+    assert max_rel(16) < 1e-4
