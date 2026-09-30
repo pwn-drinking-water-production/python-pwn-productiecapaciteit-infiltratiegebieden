@@ -843,12 +843,13 @@ def well_row_normals(xy):
     return normal / np.linalg.norm(normal, axis=1, keepdims=True)
 
 
-def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0):
+def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0, open_m=0.5):
     """Merge open-water polygons into water bodies.
 
     A closing (buffer out and back in by ``close_m``) bridges the gaps that culverts and bridges
     leave between the polygons of one canal, so a canal is one body without extra tips. The union
-    is then simplified.
+    is then simplified, and an opening (buffer in and back out by ``open_m``) removes slivers
+    narrower than ``2 open_m``, which have no room for a sink line ``open_m`` into the water.
 
     Parameters
     ----------
@@ -858,6 +859,8 @@ def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0):
         Closing distance in meters; gaps up to twice this width are closed.
     simplify_m : float, default 1.0
         Simplification tolerance in meters.
+    open_m : float, default 0.5
+        Opening distance in meters, the sink offset.
 
     Returns
     -------
@@ -865,7 +868,7 @@ def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0):
         (Multi)polygon of the water bodies.
     """
     merged = shapely.buffer(shapely.buffer(shapely.union_all(polygons), close_m), -close_m)
-    return shapely.simplify(merged, simplify_m)
+    return shapely.buffer(shapely.buffer(shapely.simplify(merged, simplify_m), -open_m), open_m)
 
 
 def facing_shores(xy, water, search_m, *, edge_m, min_length_m=20.0, eps_m=0.05):
@@ -1040,8 +1043,8 @@ def time_shapes(index, q_per_well_m3d, initial_q_m3d, time_constants_d, modulati
 def bed_resistance(coefficients, index, t_bodem_degc, r_bed_12c_d_per_m):
     """Canal-bed resistance over time.
 
-    ``R(t) = R_12 * viscratio(T_bodem)`` with the WVPT reference temperature, so ``R = R_12`` at
-    12 degC. Gaps in ``T_bodem`` are interpolated in time; missing values at the ends are filled
+    ``R(t) = R_12 * visc_ratio(T_bodem, temp_ref=12)``: ``R_12`` is the resistance at 12 degC,
+    whatever the reference temperature of the WVPT sheet. Gaps in ``T_bodem`` are interpolated in time; missing values at the ends are filled
     with the nearest value, with a warning. An empty (NaN) ``R_12`` means a fixed head: ``R = 0``.
 
     Parameters
@@ -1074,7 +1077,7 @@ def bed_resistance(coefficients, index, t_bodem_degc, r_bed_12c_d_per_m):
             stacklevel=2,
         )
         filled = filled.ffill().bfill()
-    return r_bed_12c_d_per_m * coefficients.wvpt.viscratio(index, filled.to_numpy()).to_numpy(dtype=float)
+    return r_bed_12c_d_per_m * coefficients.wvpt.visc_ratio(filled.to_numpy(), temp_ref=12.0)
 
 
 def strip_bed_resistance(drop_m, flow_per_m_m2d, kd_m2_per_d, leakage_resistance_d, canal_offsets_m):

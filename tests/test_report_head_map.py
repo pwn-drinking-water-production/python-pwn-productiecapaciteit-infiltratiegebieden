@@ -205,6 +205,16 @@ def constant_kd_coefficients():
     return default_transient_coefficients(kd_ref_m2_per_d=120.0, leakage_resistance_d=57.0)
 
 
+def test_bed_resistance_is_defined_at_12_degc_whatever_the_sheet_reference():
+    # R_bed_12C_d_per_m is the resistance at 12 degC, also when a WVPT sheet uses another reference.
+    coefficients = default_transient_coefficients(temperature_ref_degc=10.0)
+    index = pd.date_range("2021-01-01", periods=2, freq="D")
+
+    resistance = bed_resistance(coefficients, index, np.array([12.0, 4.0]), 0.1)
+
+    np.testing.assert_allclose(resistance, 0.1 * _visc_ratio(np.array([12.0, 4.0])), rtol=1e-14)
+
+
 def test_bed_resistance_viscosity_gaps_and_fixed_head(constant_kd_coefficients):
     index = pd.date_range("2021-01-01", periods=7, freq="D")
     temperature = np.array([np.nan, 12.0, np.nan, 4.0, 20.0, np.nan, np.nan])
@@ -638,6 +648,15 @@ def test_prepare_water_closes_a_bridge_gap():
     assert len(shores) == 1
     assert bodies.tolist() == [0]
     assert shores[0].length == pytest.approx(700.0, abs=1.0)  # the closing cuts the corners by a few decimeters
+
+
+def test_prepare_water_drops_slivers_without_room_for_a_sink_line():
+    # A 0.3 m wide ditch facing the wells cannot hold a sink line 0.5 m into the water; the opening
+    # removes it (the in-water check of _shores fails on a kept sliver) and keeps the canal.
+    shores, _ = _shores([CANAL, shapely.box(100, -60.3, 500, -60)], prepare=True)
+    assert len(shores) == 1
+    assert shapely.get_coordinates(shores[0])[:, 1].min() > 79.0  # the canal bank, corners rounded by 0.5 m
+    assert shores[0].length == pytest.approx(700.0, abs=1.0)
 
 
 def test_split_shores_cuts_pieces_by_their_distance_to_the_wells():
