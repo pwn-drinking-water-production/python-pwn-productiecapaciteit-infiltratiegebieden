@@ -16,6 +16,8 @@ from scipy.special import exp1, k0, k1
 logger = logging.getLogger(__name__)
 
 _INV_4PI = 1.0 / (4.0 * np.pi)
+# Sides of a canal relative to the row direction (increasing well number).
+CANAL_SIDES = ("left", "right")
 # Controls for the kd_grid integration method. The variable-kD convolution factors
 # the leakage decay exp(-beta^2 t) out of the kernel, which makes the source amplitude
 # grow like exp(+beta^2 t). When beta^2 * span is small the whole series fits one FFT;
@@ -272,11 +274,10 @@ def build_multiwell_geometry(
     dx_put : float
         Distance between neighboring real wells along the row, in meters.
     dx_mirrorwell, r_mirrorwel : iterable
-        Boundary specs from the config as ``(multiplicity, boundary_distance_m)``.
-        ``dx_mirrorwell`` is kept as a backward-compatible alias.
-        The image well is placed at twice this boundary distance. Negative
-        multiplicities represent opposite-sign image wells for constant-head
-        canal boundaries.
+        Canal specs from the config, one ``(strength, boundary_distance_m, side)`` per canal
+        (see :func:`_parse_image_specs`). ``dx_mirrorwell`` is kept as a backward-compatible
+        alias. The image well is placed at twice the boundary distance; on the well axis the
+        side does not matter.
     nput : int
         Number of real wells in the row.
     target_well_index : int, optional
@@ -327,7 +328,7 @@ def build_multiwell_geometry(
     for row_distance, count in neighbor_items:
         multiwell.append((float(count), row_distance * distance_scale))
 
-    for image_multi, boundary_distance in image_specs:
+    for image_multi, boundary_distance, _side in image_specs:
         image_distance = 2.0 * boundary_distance
         if include_self:
             multiwell.append((image_multi, image_distance * distance_scale))
@@ -337,7 +338,7 @@ def build_multiwell_geometry(
                 float(np.hypot(row_distance, image_distance)) * distance_scale,
             ))
 
-    mirrorwell_multiplicity = sum(abs(multi) for multi, _ in image_specs)
+    mirrorwell_multiplicity = sum(abs(multi) for multi, _, _ in image_specs)
     counts = {
         "self_wells": int(include_self),
         "neighbor_well_terms": len(neighbor_items),
@@ -353,21 +354,39 @@ def build_multiwell_geometry(
 
 
 def _parse_image_specs(r_mirrorwel):
-    """Normalize boundary specs into a list of ``(multiplicity, boundary_distance_m)``."""
+    """Validate canal specs into a list of ``(strength, boundary_distance_m, side)``.
+
+    Each entry is one canal parallel to the well row: ``strength`` is the image-well
+    multiplicity (``-1`` for a constant-head canal), ``boundary_distance_m`` the
+    perpendicular distance from the row to the canal, and ``side`` whether the canal lies
+    ``"left"`` or ``"right"`` of the row direction (increasing well number). Canals on both
+    sides of a row are two entries, e.g. ``[(-1, 82, "left"), (-1, 82, "right")]``.
+
+    Parameters
+    ----------
+    r_mirrorwel : iterable of tuple or None
+        Canal specs; ``None`` or empty means no canals.
+
+    Returns
+    -------
+    list of tuple
+        ``(strength, boundary_distance_m, side)`` with float strength and distance.
+    """
     if r_mirrorwel is None:
         return []
-    image_arr = np.asarray(r_mirrorwel, dtype=float)
-    if image_arr.size == 0:
-        return []
-    image_arr = np.atleast_2d(image_arr)
-    if image_arr.shape[1] != 2:
-        raise ValueError("r_mirrorwel must contain (multiplicity, boundary_distance_m) pairs")
-    if not np.isfinite(image_arr).all():
-        raise ValueError("r_mirrorwel contains NaN or infinite values")
-    for distance in image_arr[:, 1]:
+    specs = []
+    for entry in r_mirrorwel:
+        if not isinstance(entry, (tuple, list)) or len(entry) != 3:
+            raise ValueError(f"r_mirrorwel entries must be (strength, boundary_distance_m, side), got {entry!r}")
+        strength, distance, side = float(entry[0]), float(entry[1]), entry[2]
+        if not np.isfinite([strength, distance]).all():
+            raise ValueError("r_mirrorwel contains NaN or infinite values")
         if distance <= 0.0:
             raise ValueError(f"Mirror-well boundary distance must be positive, got {distance}")
-    return [(float(multi), float(distance)) for multi, distance in image_arr]
+        if side not in CANAL_SIDES:
+            raise ValueError(f"r_mirrorwel side must be one of {CANAL_SIDES}, got {side!r}")
+        specs.append((strength, distance, side))
+    return specs
 
 
 def crosssection_observation_points(
@@ -380,9 +399,10 @@ def crosssection_observation_points(
 ):
     """Observation-point coordinates for a drawdown cross-section.
 
-    The well row lies on the x-axis, well ``j`` at ``(j * dx_put, 0)``. A boundary
-    (``r_mirrorwel``) is a line parallel to the row on the ``+y`` side; the
-    cross-section is measured from the start well outward along one direction.
+    The well row lies on the x-axis, well ``j`` at ``(j * dx_put, 0)``, so the left side of
+    the row is ``+y``. A canal (``r_mirrorwel``) is a line parallel to the row at ``y = +b``
+    (left) or ``y = -b`` (right); the cross-section is measured from the start well outward
+    along one direction.
 
     Parameters
     ----------
@@ -396,9 +416,9 @@ def crosssection_observation_points(
         Start the section at the center well or at the last (end) well.
     orientation : {"perpendicular", "along"}
         Direction of the section. ``"center"`` only allows ``"perpendicular"``
-        (running away from the row, toward the ``+y`` boundary side). At the end
-        well, ``"perpendicular"`` runs toward the boundary side and ``"along"``
-        runs outward along the row axis, away from the well field.
+        (running away from the row to its left, ``+y``). At the end well,
+        ``"perpendicular"`` runs to the left of the row and ``"along"`` runs outward
+        along the row axis, away from the well field.
 
     Returns
     -------
@@ -437,66 +457,27 @@ def crosssection_observation_points(
     return px, py, well_xs, start_index
 
 
-def crosssection_image_offsets(r_mirrorwel, boundary_perp_offsets=None):
-    """Resolve boundary specs into signed perpendicular canal offsets for a cross-section.
+def crosssection_image_offsets(r_mirrorwel):
+    """Signed perpendicular canal offsets for a cross-section.
 
-    ``r_mirrorwel`` stores only ``(multiplicity, distance)`` and discards which *side* of
-    the well row each boundary sits on. That is lossless on the well axis (where
-    ``dp_model``/``dp_steady`` live and the ``+b`` / ``-b`` images are equidistant) but a
-    perpendicular cross-section samples off-axis, where the side matters. This resolves the
-    side from the multiplicity:
+    In the cross-section frame the row runs along ``+x`` with increasing well number, so a
+    ``"left"`` canal lies at ``y = +b`` and a ``"right"`` canal at ``y = -b``. The image well
+    of a real well sits at ``y = 2 * signed_offset_m``.
 
-    - ``(mult, b)`` with ``|mult| == 1`` -> a single canal; only allowed when it is the
-      sole boundary, placed on ``+b`` (the section runs toward it).
-    - ``(mult, b)`` with ``|mult| == 2`` -> two opposite-side canals at ``+b`` and ``-b``,
-      each of strength ``sign(mult)`` (the dune-infiltration "wells between two panden"
-      layout that the collapsed ``(-2, b)`` config entries encode).
-    - anything else (mixed distances such as ``[(-1, 250), (-1, 82)]``, or ``|mult| > 2``)
-      -> the side is ambiguous; raise ``NotImplementedError`` asking for explicit
-      ``boundary_perp_offsets``.
+    Parameters
+    ----------
+    r_mirrorwel : iterable of tuple or None
+        Canal specs ``(strength, boundary_distance_m, side)``, see :func:`_parse_image_specs`.
 
-    ``boundary_perp_offsets``, when given, is a list of ``(strength, signed_offset_m)``
-    used directly (overriding ``r_mirrorwel``), so asymmetric strangen and "run away from
-    the canal" sections stay expressible. The image well of a real well sits at
-    ``y = 2 * signed_offset_m``.
-
-    Returns a list of ``(strength, signed_offset_m)`` boundary-line offsets.
+    Returns
+    -------
+    list of tuple
+        ``(strength, signed_offset_m)`` per canal.
     """
-    if boundary_perp_offsets is not None:
-        offsets = []
-        for strength, signed_offset in boundary_perp_offsets:
-            strength = float(strength)
-            signed_offset = float(signed_offset)
-            if not np.isfinite([strength, signed_offset]).all():
-                raise ValueError("boundary_perp_offsets contains NaN or infinite values")
-            if signed_offset == 0.0:
-                raise ValueError("boundary_perp_offsets entries must have a nonzero offset")
-            offsets.append((strength, signed_offset))
-        return offsets
-
-    explicit_hint = "pass boundary_perp_offsets=[(strength, signed_offset_m), ...] explicitly"
-    specs = _parse_image_specs(r_mirrorwel)
-    offsets = []
-    has_single = False
-    for multi, boundary in specs:
-        magnitude = int(round(abs(multi)))
-        if magnitude not in {1, 2} or not np.isclose(abs(multi), magnitude):
-            raise NotImplementedError(
-                f"cross-section cannot infer canal sides for multiplicity {multi}; {explicit_hint}"
-            )
-        sign = 1.0 if multi > 0 else -1.0
-        offsets.append((sign, boundary))
-        if magnitude == 2:
-            offsets.append((sign, -boundary))
-        has_single |= magnitude == 1
-
-    # A lone single-sided canal runs the section toward it; a single-sided canal that
-    # coexists with any other boundary has an unknown side and must be made explicit.
-    if has_single and len(specs) > 1:
-        raise NotImplementedError(
-            f"cross-section cannot infer canal sides for r_mirrorwel={r_mirrorwel!r}; {explicit_hint}"
-        )
-    return offsets
+    return [
+        (strength, distance if side == "left" else -distance)
+        for strength, distance, side in _parse_image_specs(r_mirrorwel)
+    ]
 
 
 def build_crosssection_multiwell(px, py, well_xs, image_offsets, well_radius_m):

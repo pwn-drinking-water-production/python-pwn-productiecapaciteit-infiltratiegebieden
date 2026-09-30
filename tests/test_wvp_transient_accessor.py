@@ -16,6 +16,8 @@ from productiecapaciteit.src.wvp_transient_funs import (
     steady_multiwell_resistance_from_kd,
 )
 
+TWO_CANALS = [(-1.0, 82.0, "left"), (-1.0, 82.0, "right")]
+
 
 def _steady_coefficients(offset=-0.01, slope=0.0):
     return pd.Series({
@@ -192,13 +194,13 @@ def test_wvpt_dp_steady_respects_multiwell_geometry():
         flow_m3h,
         nput=3,
         dx_tussenputten=15.0,
-        r_mirrorwel=[(-1.0, 50.0)],
+        r_mirrorwel=[(-1.0, 50.0, "left")],
         target_well_index=1,
     )
 
     multiwell, _ = build_multiwell_geometry(
         15.0,
-        [(-1.0, 50.0)],
+        [(-1.0, 50.0, "left")],
         3,
         target_well_index=1,
         distance_scale=1.0 / coefficients.wvpt.well_radius_m,
@@ -284,7 +286,7 @@ def test_negative_image_well_reduces_steady_resistance():
     )
     with_image, _ = build_multiwell_geometry(
         15.0,
-        [(-1.0, 50.0)],
+        [(-1.0, 50.0, "left")],
         1,
         distance_scale=1.0 / well_radius_m,
     )
@@ -311,26 +313,31 @@ def test_invalid_r_mirrorwel_shape_is_rejected():
     index = pd.date_range("2020-01-01", periods=4, freq="D")
     coefficients = _constant_resistance_coefficients(kd=100.0)
 
-    with pytest.raises(ValueError, match="multiplicity"):
-        coefficients.wvpt.dp_model(
-            index,
-            np.ones(index.size),
-            nput=1,
-            dx_tussenputten=15.0,
-            r_mirrorwel=[50.0],
-        )
+    for r_mirrorwel, match in [
+        ([50.0], "strength, boundary_distance_m, side"),
+        ([(-1.0, 50.0)], "strength, boundary_distance_m, side"),
+        ([(-1.0, 50.0, "east")], "side must be one of"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            coefficients.wvpt.dp_model(
+                index,
+                np.ones(index.size),
+                nput=1,
+                dx_tussenputten=15.0,
+                r_mirrorwel=r_mirrorwel,
+            )
 
 
 def test_build_multiwell_geometry_accepts_dx_mirrorwell_keyword_alias():
     dx_keyword, dx_counts = build_multiwell_geometry(
         dx_put=15.0,
-        dx_mirrorwell=[(-1.0, 50.0)],
+        dx_mirrorwell=[(-1.0, 50.0, "left")],
         nput=3,
         distance_scale=5.0,
     )
     r_keyword, r_counts = build_multiwell_geometry(
         dx_put=15.0,
-        r_mirrorwel=[(-1.0, 50.0)],
+        r_mirrorwel=[(-1.0, 50.0, "left")],
         nput=3,
         distance_scale=5.0,
     )
@@ -342,7 +349,7 @@ def test_build_multiwell_geometry_accepts_dx_mirrorwell_keyword_alias():
 def test_r_mirrorwel_boundary_distance_is_doubled_to_image_well_distance():
     geometry, counts = build_multiwell_geometry(
         dx_put=15.0,
-        r_mirrorwel=[(-1.0, 50.0)],
+        r_mirrorwel=[(-1.0, 50.0, "left")],
         nput=1,
         distance_scale=1.0,
     )
@@ -480,12 +487,12 @@ def test_wvpt_non_reference_temperature_applies_current_viscosity_behavior():
 # --------------------------------------------------------------------------- #
 def test_crosssection_point_at_well_matches_target_well_geometry():
     # An observation point sitting on a well reproduces build_multiwell_geometry
-    # (with symmetric neighbor pairs collapsed) term-for-term in total weight, even for a
-    # two-sided (-2, b) boundary whose +-b images coincide on the axis.
+    # (with symmetric neighbor pairs collapsed) term-for-term in total weight, even for
+    # canals on both sides whose +-b images coincide on the axis.
     nput = 5
     dx = 15.0
     well_radius_m = 0.2
-    r_mirrorwel = [(-2.0, 82.0)]
+    r_mirrorwel = TWO_CANALS
 
     px, py, well_xs, start_index = crosssection_observation_points(
         nput, dx, [0.0], start="center", orientation="perpendicular"
@@ -510,30 +517,14 @@ def test_crosssection_point_at_well_matches_target_well_geometry():
     assert weight_by_distance(section) == pytest.approx(weight_by_distance(reference))
 
 
-def test_crosssection_image_offsets_splits_two_sided_boundary():
-    # (-2, b) is two opposite-side canals; it must split to +-b, each strength -1.
-    assert sorted(crosssection_image_offsets([(-2.0, 82.0)])) == sorted([
+def test_crosssection_image_offsets_place_left_at_plus_b_and_right_at_minus_b():
+    # The row runs along +x with increasing well number, so left is +y. Order is kept.
+    assert crosssection_image_offsets(TWO_CANALS) == [(-1.0, 82.0), (-1.0, -82.0)]
+    assert crosssection_image_offsets([(-1.0, 250.0, "right"), (-1.0, 82.0, "left")]) == [
+        (-1.0, -250.0),
         (-1.0, 82.0),
-        (-1.0, -82.0),
-    ])
-    # A single canal stays one-sided on +b.
-    assert crosssection_image_offsets([(-1.0, 75.0)]) == [(-1.0, 75.0)]
-    # No boundary -> no images.
+    ]
     assert crosssection_image_offsets([]) == []
-
-
-def test_crosssection_image_offsets_refuses_ambiguous_boundary():
-    # Asymmetric opposite-side canals: side per canal is unknown -> refuse, ask for offsets.
-    with pytest.raises(NotImplementedError, match="boundary_perp_offsets"):
-        crosssection_image_offsets([(-1.0, 250.0), (-1.0, 82.0)])
-
-
-def test_crosssection_image_offsets_override_is_used_verbatim():
-    offsets = crosssection_image_offsets(
-        [(-1.0, 250.0), (-1.0, 82.0)],
-        boundary_perp_offsets=[(-1.0, 250.0), (-1.0, -82.0)],
-    )
-    assert offsets == [(-1.0, 250.0), (-1.0, -82.0)]
 
 
 # nput=5 -> center well index 2, end well index 4.
@@ -549,7 +540,7 @@ def test_dp_steady_crosssection_zero_distance_nests_to_at_well(start, orientatio
     index = pd.date_range("2020-01-01", periods=3, freq="D")
     coefficients = _constant_resistance_coefficients(kd=100.0)
     flow_m3h = np.array([12.0, 24.0, 36.0])
-    kwargs = dict(nput=5, dx_tussenputten=15.0, r_mirrorwel=[(-2.0, 82.0)])
+    kwargs = dict(nput=5, dx_tussenputten=15.0, r_mirrorwel=TWO_CANALS)
 
     field = coefficients.wvpt.dp_steady_crosssection(
         index, flow_m3h, distances=[0.0, 40.0], start=start, orientation=orientation, **kwargs
@@ -576,7 +567,7 @@ def test_dp_model_crosssection_zero_distance_nests_to_at_well(
     kwargs = dict(
         nput=5,
         dx_tussenputten=15.0,
-        r_mirrorwel=[(-2.0, 82.0)],
+        r_mirrorwel=TWO_CANALS,
         initial_condition=initial_condition,
         integration_method=method,
     )
@@ -641,12 +632,12 @@ def test_dp_steady_crosssection_applies_temperature_correction():
     coefficients = _constant_resistance_coefficients(kd=100.0)
     temp_wvp = pd.Series(20.0, index=index)
     flow_m3h = np.full(index.size, 30.0)
-    kwargs = dict(nput=5, dx_tussenputten=15.0, r_mirrorwel=[(-2.0, 82.0)], distances=[0.0, 40.0], start="center")
+    kwargs = dict(nput=5, dx_tussenputten=15.0, r_mirrorwel=TWO_CANALS, distances=[0.0, 40.0], start="center")
 
     field_temp = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, temp_wvp=temp_wvp, **kwargs)
     field_notemp = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, **kwargs)
     at_well_temp = coefficients.wvpt.dp_steady(
-        index, flow_m3h, nput=5, dx_tussenputten=15.0, r_mirrorwel=[(-2.0, 82.0)], temp_wvp=temp_wvp, target_well_index=2
+        index, flow_m3h, nput=5, dx_tussenputten=15.0, r_mirrorwel=TWO_CANALS, temp_wvp=temp_wvp, target_well_index=2
     )
 
     np.testing.assert_allclose(field_temp[0.0].to_numpy(), at_well_temp.to_numpy(), rtol=0.0, atol=1e-12)
@@ -668,25 +659,19 @@ def test_crosssection_end_perpendicular_differs_from_along_offaxis():
     assert np.all(np.abs(perp[40.0].to_numpy() - along[40.0].to_numpy()) > 1e-2)
 
 
-def test_dp_steady_crosssection_two_sided_matches_explicit_and_not_one_sided():
-    # The (-2, b) auto-split must equal explicit +-b images, and must DIFFER off-axis from
-    # the (wrong) one-sided +b placement while still agreeing on-axis (d=0).
+def test_dp_steady_crosssection_two_sided_differs_off_axis_from_one_sided():
+    # Canals on both sides and a double-strength canal on one side agree on the well axis
+    # (d=0) but must differ off-axis, where the side matters.
     index = pd.date_range("2020-01-01", periods=2, freq="D")
     coefficients = _constant_resistance_coefficients(kd=100.0)
     flow_m3h = np.full(index.size, 30.0)
     common = dict(nput=5, dx_tussenputten=15.0, distances=[0.0, 30.0, 60.0], start="center")
 
-    auto = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, r_mirrorwel=[(-2.0, 82.0)], **common)
-    explicit = coefficients.wvpt.dp_steady_crosssection(
-        index, flow_m3h, r_mirrorwel=[], boundary_perp_offsets=[(-1.0, 82.0), (-1.0, -82.0)], **common
-    )
-    one_sided = coefficients.wvpt.dp_steady_crosssection(
-        index, flow_m3h, r_mirrorwel=[], boundary_perp_offsets=[(-2.0, 82.0)], **common
-    )
+    two_sided = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, r_mirrorwel=TWO_CANALS, **common)
+    one_sided = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, r_mirrorwel=[(-2.0, 82.0, "left")], **common)
 
-    np.testing.assert_allclose(auto.to_numpy(), explicit.to_numpy(), rtol=1e-12)
-    np.testing.assert_allclose(auto[0.0].to_numpy(), one_sided[0.0].to_numpy(), rtol=1e-12)
-    assert np.all(np.abs(auto[30.0].to_numpy() - one_sided[30.0].to_numpy()) > 1e-3)
+    np.testing.assert_allclose(two_sided[0.0].to_numpy(), one_sided[0.0].to_numpy(), rtol=1e-12)
+    assert np.all(np.abs(two_sided[30.0].to_numpy() - one_sided[30.0].to_numpy()) > 1e-3)
 
 
 def test_dp_steady_crosssection_drawdown_decays_with_distance():
@@ -722,7 +707,7 @@ def test_dp_steady_crosssection_sign_flips_beyond_single_boundary():
         flow_m3h,
         nput=5,
         dx_tussenputten=15.0,
-        r_mirrorwel=[(-1.0, 50.0)],
+        r_mirrorwel=[(-1.0, 50.0, "left")],
         distances=[40.0, 60.0],
         start="center",
     )
@@ -746,15 +731,28 @@ def test_crosssection_observation_points_validation(kwargs, match):
         crosssection_observation_points(5, 15.0, **kwargs)
 
 
+def test_dp_steady_crosssection_right_canal_is_behind_the_section():
+    # The perpendicular section runs to the left; a right-side canal lies behind it, so the
+    # section shows no mounding at 60 m where a left-side canal at 50 m does.
+    index = pd.date_range("2020-01-01", periods=2, freq="D")
+    coefficients = _constant_resistance_coefficients(kd=100.0)
+    flow_m3h = np.full(index.size, 30.0)
+    common = dict(nput=5, dx_tussenputten=15.0, distances=[60.0], start="center")
+
+    left = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, r_mirrorwel=[(-1.0, 50.0, "left")], **common)
+    right = coefficients.wvpt.dp_steady_crosssection(index, flow_m3h, r_mirrorwel=[(-1.0, 50.0, "right")], **common)
+
+    assert np.all(left[60.0].to_numpy() > 0.0)
+    assert np.all(right[60.0].to_numpy() < 0.0)
+
+
 @pytest.mark.parametrize("method_name", ["dp_steady_crosssection", "dp_model_crosssection"])
-def test_crosssection_accessor_refuses_ambiguous_boundary(method_name):
-    # The helpful NotImplementedError must surface to the caller of the accessor methods,
-    # not just the geometry helper, when canal sides cannot be inferred.
+def test_crosssection_accessor_rejects_canal_without_side(method_name):
     index = pd.date_range("2020-01-01", periods=3, freq="D")
     coefficients = _constant_resistance_coefficients(kd=100.0)
     method = getattr(coefficients.wvpt, method_name)
 
-    with pytest.raises(NotImplementedError, match="boundary_perp_offsets"):
+    with pytest.raises(ValueError, match="side"):
         method(
             index,
             np.full(index.size, 30.0),
@@ -780,7 +778,7 @@ def test_dp_model_multiwell_kd_grid_matches_gauss():
     common = dict(
         nput=3,
         dx_tussenputten=15.0,
-        r_mirrorwel=[(-1.0, 50.0)],
+        r_mirrorwel=[(-1.0, 50.0, "left")],
         target_well_index=1,
         initial_condition="zero",
     )
@@ -805,7 +803,7 @@ def test_dp_model_multiwell_kd_grid_steady_ic_matches_gauss():
     common = dict(
         nput=3,
         dx_tussenputten=15.0,
-        r_mirrorwel=[(-1.0, 50.0)],
+        r_mirrorwel=[(-1.0, 50.0, "left")],
         target_well_index=1,
         initial_condition="steady",
     )
@@ -821,7 +819,7 @@ def test_dp_model_multiwell_steady_ic_matches_dp_steady():
     index = pd.date_range("2020-01-01", periods=8, freq="D")
     coefficients = _constant_resistance_coefficients(kd=100.0)
     flow_m3h = np.full(index.size, 12.0)
-    common = dict(nput=3, dx_tussenputten=15.0, r_mirrorwel=[(-1.0, 50.0)], target_well_index=1)
+    common = dict(nput=3, dx_tussenputten=15.0, r_mirrorwel=[(-1.0, 50.0, "left")], target_well_index=1)
 
     transient = coefficients.wvpt.dp_model(
         index, flow_m3h, initial_condition="steady", integration_method="gauss", **common

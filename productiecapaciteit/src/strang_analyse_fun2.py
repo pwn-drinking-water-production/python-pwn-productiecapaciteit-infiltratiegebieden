@@ -1,3 +1,4 @@
+import ast
 import os
 from datetime import datetime, timedelta
 
@@ -277,7 +278,8 @@ def get_config(fn="strang_props7.csv"):
     if "dx_mirrorwell" in out.columns and "r_mirrorwel" not in out.columns:
         out = out.rename(columns={"dx_mirrorwell": "r_mirrorwel"})
     out = out.astype(dtypes)
-    out["r_mirrorwel"] = out["r_mirrorwel"].apply(pd.eval)
+    # One (strength, boundary_distance_m, side) tuple per canal; literal_eval keeps the side strings.
+    out["r_mirrorwel"] = out["r_mirrorwel"].apply(ast.literal_eval)
     return out
 
 

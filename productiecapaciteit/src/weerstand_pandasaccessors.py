@@ -742,7 +742,6 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         start="center",
         orientation="perpendicular",
         temp_wvp=None,
-        boundary_perp_offsets=None,
         initial_condition="steady",
         frac_step_max=0.95,
         tmax_days_cap=None,
@@ -765,15 +764,13 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         reproduces the at-well :meth:`dp_model`. Drawdown is negative meters, matching
         :meth:`dp_model`.
 
-        The perpendicular section needs each boundary's side, which ``r_mirrorwel`` does
-        not encode; it is resolved by :func:`crosssection_image_offsets` (``(-2, b)`` ->
-        two canals at ``+-b``). For asymmetric boundaries pass
-        ``boundary_perp_offsets=[(strength, signed_offset_m), ...]`` to set the sides
-        explicitly.
+        The perpendicular section runs to the left of the row; each canal's side comes from
+        its ``(strength, boundary_distance_m, side)`` entry in ``r_mirrorwel`` (see
+        :func:`crosssection_image_offsets`).
 
         Caveat (image method): beyond the nearest constant-head canal the single-image
         superposition flips sign (spurious mounding). For a single canal at ``b`` the
-        zero-crossing is exactly at ``b``; for a two-sided ``(-2, b)`` boundary the
+        zero-crossing is exactly at ``b``; for canals on both sides at ``b`` the
         single-image-pair approximation pushes the onset inward to roughly ``0.6-0.8 * b``
         (worse for large ``sqrt(kD * c) / b``), so keep two-sided perpendicular sections to
         distances below about ``0.6 * b``.
@@ -788,7 +785,7 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         px, py, well_xs, _start_index = crosssection_observation_points(
             nput, dx_tussenputten, distances, start=start, orientation=orientation
         )
-        image_offsets = crosssection_image_offsets(r_mirrorwel, boundary_perp_offsets)
+        image_offsets = crosssection_image_offsets(r_mirrorwel)
         kd = self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float)
         q_per_well = flow / nput_f * 24.0
 
@@ -831,7 +828,6 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         start="center",
         orientation="perpendicular",
         temp_wvp=None,
-        boundary_perp_offsets=None,
     ):
         """Steady-state drawdown along a cross-section, as a time x distance field.
 
@@ -842,9 +838,7 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         distance; ``distance == 0`` reproduces :meth:`dp_steady`. Drawdown is negative
         meters, matching :meth:`dp_steady`.
 
-        Boundary sides are resolved by :func:`crosssection_image_offsets`; pass
-        ``boundary_perp_offsets`` for asymmetric strangen (see
-        :meth:`dp_model_crosssection`).
+        Canal sides come from ``r_mirrorwel`` (see :meth:`dp_model_crosssection`).
         """
         index = pd.DatetimeIndex(index)
         flow = self._as_1d_float_array("flow", flow, index)
@@ -856,7 +850,7 @@ class WvpTransientResistanceAccessor(WvpResistanceAccessor):
         px, py, well_xs, _start_index = crosssection_observation_points(
             nput, dx_tussenputten, distances, start=start, orientation=orientation
         )
-        image_offsets = crosssection_image_offsets(r_mirrorwel, boundary_perp_offsets)
+        image_offsets = crosssection_image_offsets(r_mirrorwel)
         kd = self.kD_model(index, temp_wvp=temp_wvp).to_numpy(dtype=float)
 
         data = np.empty((index.size, distances.size), dtype=float)

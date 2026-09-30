@@ -42,7 +42,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
+from scipy.spatial.distance import cdist
 
 from productiecapaciteit import data_dir, plot_styles_dir, results_dir
 from productiecapaciteit.src.strang_analyse_fun2 import (
@@ -54,7 +56,10 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
     WvpTransientResistanceAccessor,  # noqa: F401  (registers the ``.wvpt`` accessor)
 )
 from productiecapaciteit.src.wvp_transient_funs import (
+    _parse_image_specs,
     build_multiwell_geometry,
+    infer_lower_timestep,
+    objective,
 )
 
 CONFIG_FN = "strang_props7.csv"
@@ -767,6 +772,281 @@ def configure_logging(output_dir):
     report_logger.addHandler(file_handler)
     report_logger.addHandler(stream_handler)
     return report_logger
+
+
+# --------------------------------------------------------------------------- #
+# 2D head map
+# --------------------------------------------------------------------------- #
+# The calibrated drawdown of every real well of a strang and of its canal image wells,
+# superposed on a map grid. All wells pump the same flow per well, so each real or image well
+# contributes ``strength * s(t; r)`` with one shared distance response ``s(t; r)``: it is solved
+# once on a table of radii (distance_table) and interpolated in ``ln r`` for every
+# (grid point, source) pair (drawdown_field). Canals are constant-head boundaries modelled
+# pragmatically: for every canal in ``r_mirrorwel`` each well gets an image (the canal strength)
+# at twice the canal distance along its local row normal, on the canal's side; between a left and
+# a right canal the images can be reflected back and forth (image_offsets). On straight rows this
+# is the exact image solution; on bent rows the canal is only approximately a constant-head line.
+
+
+def row_segments(well_number, xy, *, max_step_factor=3.0):
+    """Order wells along the row by well number and split the row at large gaps.
+
+    Parameters
+    ----------
+    well_number : array-like
+        Well number of each well (the mpcode suffix), shape ``(n,)``.
+    xy : array-like
+        Well coordinates, shape ``(n, 2)``.
+    max_step_factor : float, default 3.0
+        A step between consecutive wells longer than this factor times the median step starts a
+        new segment.
+
+    Returns
+    -------
+    list of ndarray
+        Per segment, the indices into ``xy`` in row order.
+    """
+    order = np.argsort(np.asarray(well_number), kind="stable")
+    steps = np.hypot(*np.diff(np.asarray(xy, dtype=float)[order], axis=0).T)
+    breaks = np.flatnonzero(steps > max_step_factor * np.median(steps)) + 1
+    return np.split(order, breaks)
+
+
+def well_row_normals(xy):
+    """Return the unit normals of one row segment, pointing to the left of the row direction.
+
+    The tangent at a well is the line from the well behind to the well in front (one-sided at
+    the row ends); the normal is that tangent rotated by +90 degrees.
+
+    Parameters
+    ----------
+    xy : array-like
+        Well coordinates of one segment in row order, shape ``(n, 2)`` with ``n >= 2``.
+
+    Returns
+    -------
+    ndarray
+        Unit normals, shape ``(n, 2)``.
+    """
+    xy = np.asarray(xy, dtype=float)
+    if xy.shape[0] < 2:
+        msg = "A row segment needs at least two wells to define a direction"
+        raise ValueError(msg)
+    tangent = np.gradient(xy, axis=0)
+    normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])
+    return normal / np.linalg.norm(normal, axis=1, keepdims=True)
+
+
+def canal_sides(normals, r_mirrorwel):
+    """Outward normals of every canal in the boundary specs.
+
+    Parameters
+    ----------
+    normals : array-like
+        Left-pointing unit normals of all wells from :func:`well_row_normals`, shape ``(n, 2)``.
+    r_mirrorwel : list of tuple
+        Canal specs ``[(strength, boundary_distance_m, side), ...]`` from the configuration, with
+        ``side`` ``"left"`` or ``"right"`` of increasing well number (see :func:`_parse_image_specs`).
+
+    Returns
+    -------
+    list of tuple
+        ``(strength, boundary_distance_m, outward_normals)`` per canal.
+    """
+    normals = np.asarray(normals, dtype=float)
+    return [
+        (strength, boundary, normals if side == "left" else -normals)
+        for strength, boundary, side in _parse_image_specs(r_mirrorwel)
+    ]
+
+
+def image_offsets(r_mirrorwel, n_reflections=1):
+    """Image-well offsets along the left row normal, optionally reflected repeatedly between two canals.
+
+    A canal at signed offset ``y_c`` (``+b`` left, ``-b`` right) mirrors a well at ``y`` to
+    ``2 y_c - y`` and multiplies its weight by the canal strength. A single reflection per canal
+    is exact for one straight canal. Between one left and one right canal (a strip) that single
+    pair leaves the head on each canal off; reflecting the images back and forth between the two
+    canals makes both constant-head lines exact as ``n_reflections`` grows. Each order lies a
+    strip width further out, and in a leaky aquifer its effect decays like ``K0(distance / lambda)``.
+
+    Parameters
+    ----------
+    r_mirrorwel : list of tuple
+        Canal specs ``[(strength, boundary_distance_m, side), ...]`` (see :func:`_parse_image_specs`).
+    n_reflections : int, default 1
+        Number of reflections per image chain. Only used for a strip of exactly one left and one
+        right canal; any other layout gets one image per canal.
+
+    Returns
+    -------
+    list of tuple
+        ``(weight, signed_offset_m)`` per image, the offset along the left row normal.
+    """
+    canal_lines = [
+        (strength, boundary if side == "left" else -boundary)
+        for strength, boundary, side in _parse_image_specs(r_mirrorwel)
+    ]
+    is_strip = sorted(np.sign(offset) for _, offset in canal_lines) == [-1.0, 1.0]
+    if n_reflections == 1 or not is_strip:
+        return [(strength, 2.0 * offset) for strength, offset in canal_lines]
+
+    offsets = []
+    for first, second in (canal_lines, canal_lines[::-1]):
+        weight, offset = 1.0, 0.0
+        for order in range(n_reflections):
+            strength, canal_offset = first if order % 2 == 0 else second
+            weight *= strength
+            offset = 2.0 * canal_offset - offset
+            offsets.append((weight, offset))
+    return offsets
+
+
+def image_wells(xy, normals, offsets):
+    """Real wells and their canal image wells.
+
+    Parameters
+    ----------
+    xy : array-like
+        Real-well coordinates, shape ``(n, 2)``.
+    normals : array-like
+        Left-pointing unit normals of the wells from :func:`well_row_normals`, shape ``(n, 2)``.
+    offsets : list of tuple
+        ``(weight, signed_offset_m)`` per image from :func:`image_offsets`.
+
+    Returns
+    -------
+    sources : ndarray
+        Real wells followed by one image per well per offset, shape ``(n * (1 + len(offsets)), 2)``.
+    strengths : ndarray
+        ``+1`` for real wells and the image weight for images.
+    """
+    xy = np.asarray(xy, dtype=float)
+    normals = np.asarray(normals, dtype=float)
+    sources = np.concatenate([xy] + [xy + offset * normals for _, offset in offsets])
+    strengths = np.repeat([1.0] + [weight for weight, _ in offsets], xy.shape[0])
+    return sources, strengths
+
+
+def canal_mask(gx, gy, xy, canals):
+    """Mask grid points beyond a canal.
+
+    A point is beyond a canal when its offset from the nearest real well, measured along that
+    well's outward normal, exceeds the canal distance. The image method gives non-physical heads
+    there.
+
+    Parameters
+    ----------
+    gx, gy : array-like
+        Grid coordinates (same shape).
+    xy : array-like
+        Real-well coordinates, shape ``(n, 2)``.
+    canals : list of tuple
+        Canal sides from :func:`canal_sides`.
+
+    Returns
+    -------
+    ndarray of bool
+        True beyond a canal, shape of ``gx``.
+    """
+    xy = np.asarray(xy, dtype=float)
+    points = np.column_stack([np.ravel(gx), np.ravel(gy)])
+    nearest = cdist(points, xy).argmin(axis=1)
+    offset = points - xy[nearest]
+    mask = np.zeros(points.shape[0], dtype=bool)
+    for _, boundary, normals in canals:
+        mask |= np.einsum("ij,ij->i", offset, normals[nearest]) > boundary
+    return mask.reshape(np.shape(gx))
+
+
+def distance_table(coefficients, index, q_per_well_m3d, radii, *, initial_condition, integration_method="kd_grid"):
+    """Transient drawdown of one well at a set of distances.
+
+    Each distance ``r`` is solved as a well of radius ``r`` (``alpha`` scaled by
+    ``r / well_radius``), so every column gets the exact near-window integral of the kd_grid
+    method. Treating ``r > well_radius`` as a point source instead misses the kernel peak under
+    time-varying kD (decimeters near the well).
+
+    Parameters
+    ----------
+    coefficients : pandas.Series
+        Calibrated transient WVP coefficients (``.wvpt`` accessor).
+    index : pandas.DatetimeIndex
+        Model times.
+    q_per_well_m3d : array-like
+        Flow per well in m3/d; ``q[i]`` applies on ``(index[i - 1], index[i]]`` (``flow_label="right"``).
+    radii : array-like
+        Distances from the well in meters, each at least the well radius.
+    initial_condition : str or float
+        ``"zero"``, ``"steady"`` or a steady pre-period flow per well in m3/d.
+    integration_method : str, default "kd_grid"
+        Integration method of :func:`hantush_variable_kd`.
+
+    Returns
+    -------
+    ndarray
+        Drawdown in positive meters, shape ``(len(index), len(radii))``.
+    """
+    wvpt = coefficients.wvpt
+    index = pd.DatetimeIndex(index)
+    pextra = {
+        "index": index,
+        "Q_obs": np.asarray(q_per_well_m3d, dtype=float),
+        "kD": wvpt.kD_model(index).to_numpy(dtype=float),
+        "dt_lower": infer_lower_timestep(index),
+        "multiwell": [(1.0, 1.0)],
+        "multiwell_contains_r_self": True,
+        "initial_condition": initial_condition,
+        "integration_method": integration_method,
+        "flow_label": "right",
+    }
+    alpha_per_m = wvpt.alpha / wvpt.well_radius_m
+    return np.column_stack([
+        objective([alpha_per_m * radius, wvpt.beta], return_result=True, **pextra)
+        for radius in np.asarray(radii, dtype=float)
+    ])
+
+
+def drawdown_field(table_rows, radii, sources, strengths, gx, gy, well_radius_m, *, max_elements=5_000_000):
+    """Superposed drawdown of all sources on a grid.
+
+    Parameters
+    ----------
+    table_rows : array-like
+        Rows of :func:`distance_table` for the selected times, shape ``(n_times, len(radii))``.
+    radii : array-like
+        Increasing table distances in meters, starting at the well radius.
+    sources : array-like
+        Source coordinates, shape ``(m, 2)``.
+    strengths : array-like
+        Source strengths, shape ``(m,)``.
+    gx, gy : array-like
+        Grid coordinates (same shape).
+    well_radius_m : float
+        Distances are clipped at the well radius.
+    max_elements : int, default 5_000_000
+        Grid points are processed in chunks of at most this many (point, source) distances, which
+        bounds memory when repeated reflections add many image wells.
+
+    Returns
+    -------
+    ndarray
+        Drawdown in positive meters, shape ``(n_times, *gx.shape)``.
+    """
+    points = np.column_stack([np.ravel(gx), np.ravel(gy)])
+    sources = np.asarray(sources, dtype=float)
+    splines = [CubicSpline(np.log(radii), row) for row in table_rows]
+    field = np.empty((len(splines), points.shape[0]))
+    chunk = max(1, max_elements // sources.shape[0])
+    for start in range(0, points.shape[0], chunk):
+        distance = np.maximum(cdist(points[start : start + chunk], sources), well_radius_m)
+        if distance.max() > radii[-1]:
+            msg = f"Largest source distance {distance.max():.1f} m exceeds the table range {radii[-1]:.1f} m"
+            raise ValueError(msg)
+        log_distance = np.log(distance)
+        for i, spline in enumerate(splines):
+            field[i, start : start + chunk] = spline(log_distance) @ strengths
+    return field.reshape(len(splines), *np.shape(gx))
 
 
 # --------------------------------------------------------------------------- #

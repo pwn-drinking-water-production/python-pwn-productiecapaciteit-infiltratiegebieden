@@ -607,7 +607,7 @@ def test_kd_grid_finite_radius_near_window_is_target_well_only(monkeypatch, leak
     # A close neighbour at dx=15 m (eff alpha^2 = 11.25) plus an image well: under the old
     # alpha^2 <= w_near rule both would have been pulled into the near window.
     multiwell, _counts = build_multiwell_geometry(
-        15.0, [(-1.0, 50.0)], 3, target_well_index=1, distance_scale=1.0 / well_radius
+        15.0, [(-1.0, 50.0, "left")], 3, target_well_index=1, distance_scale=1.0 / well_radius
     )
     neighbour_alpha2 = sorted({(distance * alpha) ** 2 for _multi, distance in multiwell})
     assert neighbour_alpha2[1] > target_alpha2 * 100.0  # the nearest neighbour is far above the target
@@ -679,7 +679,9 @@ def test_kd_grid_point_source_kernel_matches_direct_e1():
     # (terms far from their peak) plus direct E1 near each peak; must equal the plain sum.
     radius = 0.3
     alpha = (radius**2 * 0.2 / 4.0) ** 0.5
-    multiwell, _ = build_multiwell_geometry(15.0, [(-2.0, 120.0), (1.0, 400.0)], 30, distance_scale=1.0 / radius)
+    multiwell, _ = build_multiwell_geometry(
+        15.0, [(-2.0, 120.0, "left"), (1.0, 400.0, "right")], 30, distance_scale=1.0 / radius
+    )
     terms = np.asarray(multiwell, dtype=float)
     mults, alpha2s = terms[:, 0], (terms[:, 1] * alpha) ** 2
     w = np.arange(20001) * 6.9
