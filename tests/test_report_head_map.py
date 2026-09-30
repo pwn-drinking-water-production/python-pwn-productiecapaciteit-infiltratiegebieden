@@ -14,6 +14,7 @@ from productiecapaciteit.reports.report_wvpweerstand_transient import (
     distance_table,
     drawdown_from_kernel,
     facing_shores,
+    infiltration_by_body_and_side,
     lagged_histories,
     linesink_sources,
     map_sources,
@@ -401,6 +402,28 @@ def test_round_trip_two_pieces_two_shapes():
     total = -shapes @ strengths.sum(axis=0)
     assert np.all(total > 0.0)
     assert np.all(total < q * len(wells))
+
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["row east", "row west"])
+def test_infiltration_by_body_and_side(reverse):
+    # The side follows the well numbering: with the row running east the canal at +40 m is left; with
+    # the numbering reversed the same canal is right. Each canal is one body and carries its own nodes.
+    wells = _row(21, 10.0)[::-1] if reverse else _row(21, 10.0)
+    index = pd.date_range("2021-01-01", periods=3, freq="D")
+    shapes = np.array([[200.0], [240.0], [300.0]])
+    tables = _k0_tables(RADII_S, KD_S, LAM_S, shapes)
+    shores = np.array([_canal(40.0, True, -50.0, 250.0), _canal(-60.0, False, -50.0, 250.0)])
+    solution = solve_transient_linesinks(tables, RADII_S, wells, shores, shapes, np.full(3, 0.1), WELL_RADIUS)
+
+    infiltration = infiltration_by_body_and_side(solution, shapes, [3, 7], wells, well_row_normals(wells), index, 1.0)
+
+    near, far = ("right", "left") if reverse else ("left", "right")
+    assert infiltration.columns.tolist() == sorted([(3, near), (7, far)])
+    _, piece, strengths = linesink_sources(solution, 1.0)
+    for body, p in ((3, 0), (7, 1)):
+        side = near if body == 3 else far
+        np.testing.assert_allclose(infiltration[(body, side)], -shapes @ strengths[piece == p].sum(axis=0), rtol=1e-14)
+    assert (infiltration[(3, near)] > infiltration[(7, far)]).all()
 
 
 def test_finite_canal_lies_between_no_canal_and_long_canal():

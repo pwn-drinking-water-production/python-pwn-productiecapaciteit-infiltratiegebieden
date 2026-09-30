@@ -61,6 +61,7 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
     WvpTransientResistanceAccessor,  # noqa: F401  (registers the ``.wvpt`` accessor)
 )
 from productiecapaciteit.src.wvp_transient_funs import (
+    CANAL_SIDES,
     build_multiwell_geometry,
     infer_lower_timestep,
     objective,
@@ -1048,8 +1049,9 @@ def bed_resistance(coefficients, index, t_bodem_degc, r_bed_12c_d_per_m):
     """Canal-bed resistance over time.
 
     ``R(t) = R_12 * visc_ratio(T_bodem, temp_ref=12)``: ``R_12`` is the resistance at 12 degC,
-    whatever the reference temperature of the WVPT sheet. Gaps in ``T_bodem`` are interpolated in time; missing values at the ends are filled
-    with the nearest value, with a warning. An empty (NaN) ``R_12`` means a fixed head: ``R = 0``.
+    whatever the reference temperature of the WVPT sheet. Gaps in ``T_bodem`` are interpolated in
+    time; missing values at the ends are filled with the nearest value, with a warning. An empty
+    (NaN) ``R_12`` means a fixed head: ``R = 0``.
 
     Parameters
     ----------
@@ -1457,6 +1459,48 @@ def map_sources(solution, wells_xy, spacing_m):
     well_strengths = np.zeros((wells_xy.shape[0], strengths.shape[1]))
     well_strengths[:, 0] = 1.0
     return np.concatenate([wells_xy, nodes]), np.concatenate([well_strengths, strengths])
+
+
+def infiltration_by_body_and_side(solution, shapes, bodies, wells_xy, normals, index, spacing_m):
+    """Infiltration per water body and side of the well row over time.
+
+    Every sink node counts for the water body of its shore piece and for the side of the row it
+    lies on as seen from its nearest well: ``"left"`` along that well's left normal
+    (:func:`well_row_normals`, left of increasing well number, as the sides of ``r_mirrorwel``),
+    else ``"right"``.
+
+    Parameters
+    ----------
+    solution : dict
+        Result of :func:`solve_transient_linesinks`.
+    shapes : array-like
+        Time shapes of the solve, shape ``(len(index), K)``.
+    bodies : array-like of int
+        Water body of every shore piece.
+    wells_xy, normals : array-like
+        Well coordinates and their left normals, shape ``(n_wells, 2)``.
+    index : pandas.DatetimeIndex
+        Model times.
+    spacing_m : float
+        Sink-node spacing in meters, see :func:`linesink_sources`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Infiltration in the table unit (m3/d) per ``(body, side)`` column.
+    """
+    wells_xy = np.asarray(wells_xy, dtype=float)
+    normals = np.asarray(normals, dtype=float)
+    nodes, piece, strengths = linesink_sources(solution, spacing_m)
+    nearest = cdist(nodes, wells_xy).argmin(axis=1)
+    left = np.einsum("ij,ij->i", nodes - wells_xy[nearest], normals[nearest]) > 0.0
+    groups = pd.MultiIndex.from_arrays(
+        [np.asarray(bodies)[piece], np.where(left, CANAL_SIDES[0], CANAL_SIDES[1])], names=["body", "side"]
+    )
+    group_strengths = pd.DataFrame(strengths).groupby(groups).sum()
+    return pd.DataFrame(
+        -np.asarray(shapes, dtype=float) @ group_strengths.to_numpy().T, index=index, columns=group_strengths.index
+    )
 
 
 def drawdown_from_kernel(tables, kernel):
