@@ -35,6 +35,7 @@ innovations (first differences) on the same axis.
 
 import logging
 import tempfile
+import warnings
 from pathlib import Path
 
 import matplotlib.dates as mdates
@@ -44,7 +45,7 @@ import pandas as pd
 import shapely
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import CubicSpline
-from scipy.optimize import least_squares
+from scipy.optimize import brentq, least_squares
 from scipy.spatial.distance import cdist
 
 from productiecapaciteit import data_dir, plot_styles_dir, results_dir
@@ -57,7 +58,6 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
     WvpTransientResistanceAccessor,  # noqa: F401  (registers the ``.wvpt`` accessor)
 )
 from productiecapaciteit.src.wvp_transient_funs import (
-    _parse_image_specs,
     build_multiwell_geometry,
     infer_lower_timestep,
     objective,
@@ -778,15 +778,17 @@ def configure_logging(output_dir):
 # --------------------------------------------------------------------------- #
 # 2D head map
 # --------------------------------------------------------------------------- #
-# The calibrated drawdown of every real well of a strang and of its canal image wells,
-# superposed on a map grid. All wells pump the same flow per well, so each real or image well
-# contributes ``strength * s(t; r)`` with one shared distance response ``s(t; r)``: it is solved
-# once on a table of radii (distance_table) and interpolated in ``ln r`` for every
-# (grid point, source) pair (drawdown_field). Canals are constant-head boundaries modelled
-# pragmatically: for every canal in ``r_mirrorwel`` each well gets an image (the canal strength)
-# at twice the canal distance along its local row normal, on the canal's side; between a left and
-# a right canal the images can be reflected back and forth (image_offsets). On straight rows this
-# is the exact image solution; on bent rows the canal is only approximately a constant-head line.
+# Transient drawdown around a strang in map coordinates: every pumping well plus a line-sink along
+# each shore of the open water that the wells see (facing_shores), in one leaky aquifer that also
+# continues under and behind the water. All sources share the calibrated transient response of one
+# well: a well pumping the time shape phi_p(t) gives the drawdown table distance_table(phi_p) at a set
+# of radii. The wells pump q(t) per well (shape 0). A shore piece infiltrates
+# q'(xi, t) = -sum_n sum_p a_np P_n(xi) phi_p(t) per metre (Legendre polynomials P_n along the piece,
+# shapes: q, first-order lags of q and copies modulated by kD and by the bed resistance), realised by
+# point sinks on a line SINK_OFFSET into the water. The coefficients a_np follow from one least-squares
+# fit of the bed-resistance (Robin) condition s = R(t) q' at control points on every shore over all
+# times (solve_transient_linesinks); R = 0 is a fixed head. A field for any set of times is one matrix
+# product of the tables with a radial kernel precomputed per set of points (radial_kernel).
 
 
 def row_segments(well_number, xy, *, max_step_factor=3.0):
@@ -921,126 +923,161 @@ def facing_shores(xy, water, search_m, *, edge_m, min_length_m=20.0, eps_m=0.05)
     return shores[long_enough], kept_bodies[merged_index[long_enough]]
 
 
-def canal_sides(normals, r_mirrorwel):
-    """Outward normals of every canal in the boundary specs.
+def lagged_histories(index, values, time_constants_d, initial_value):
+    """First-order lags of a piecewise-constant history.
+
+    ``values[i]`` applies on ``(index[i - 1], index[i]]`` (``flow_label="right"``), so each lag is
+    exact across gaps: ``y_i = y_{i-1} e^{-dt/T} + values_i (1 - e^{-dt/T})``. Before ``index[0]``
+    the history is steady at ``initial_value``.
 
     Parameters
     ----------
-    normals : array-like
-        Left-pointing unit normals of all wells from :func:`well_row_normals`, shape ``(n, 2)``.
-    r_mirrorwel : list of tuple
-        Canal specs ``[(strength, boundary_distance_m, side), ...]`` from the configuration, with
-        ``side`` ``"left"`` or ``"right"`` of increasing well number (see :func:`_parse_image_specs`).
+    index : pandas.DatetimeIndex
+        Model times.
+    values : array-like
+        History values, shape ``(len(index),)``.
+    time_constants_d : array-like
+        Lag time constants in days.
+    initial_value : float
+        Steady value before ``index[0]``.
 
     Returns
     -------
-    list of tuple
-        ``(strength, boundary_distance_m, outward_normals)`` per canal.
+    ndarray
+        Lagged histories, shape ``(len(index), len(time_constants_d))``.
     """
-    normals = np.asarray(normals, dtype=float)
-    return [
-        (strength, boundary, normals if side == "left" else -normals)
-        for strength, boundary, side in _parse_image_specs(r_mirrorwel)
-    ]
+    values = np.asarray(values, dtype=float)
+    dt = np.diff(pd.DatetimeIndex(index)) / pd.Timedelta("1D")
+    decay = np.exp(-dt[:, None] / np.asarray(time_constants_d, dtype=float)[None, :])
+    lagged = np.empty((values.size, decay.shape[1]))
+    lagged[0] = initial_value
+    for i in range(1, values.size):
+        lagged[i] = decay[i - 1] * lagged[i - 1] + (1.0 - decay[i - 1]) * values[i]
+    return lagged
 
 
-def image_offsets(r_mirrorwel, n_reflections=1):
-    """Image-well offsets along the left row normal, optionally reflected repeatedly between two canals.
+def time_shapes(index, q_per_well_m3d, initial_q_m3d, time_constants_d, modulations=()):
+    """Time shapes of the line-sink inflow and their steady pre-period values.
 
-    A canal at signed offset ``y_c`` (``+b`` left, ``-b`` right) mirrors a well at ``y`` to
-    ``2 y_c - y`` and multiplies its weight by the canal strength. A single reflection per canal
-    is exact for one straight canal. Between one left and one right canal (a strip) that single
-    pair leaves the head on each canal off; reflecting the images back and forth between the two
-    canals makes both constant-head lines exact as ``n_reflections`` grows. Each order lies a
-    strip width further out, and in a leaky aquifer its effect decays like ``K0(distance / lambda)``.
+    The base shapes are ``q`` and its first-order lags (:func:`lagged_histories`). Every modulation
+    ``f`` (the kD model, the bed-resistance factor) adds the copies ``base * (f / mean(f) - 1)``.
 
     Parameters
     ----------
-    r_mirrorwel : list of tuple
-        Canal specs ``[(strength, boundary_distance_m, side), ...]`` (see :func:`_parse_image_specs`).
-    n_reflections : int, default 1
-        Number of reflections per image chain. Only used for a strip of exactly one left and one
-        right canal; any other layout gets one image per canal.
+    index : pandas.DatetimeIndex
+        Model times.
+    q_per_well_m3d : array-like
+        Flow per well in m3/d (``flow_label="right"``).
+    initial_q_m3d : float
+        Steady flow per well before ``index[0]``.
+    time_constants_d : array-like
+        Lag time constants in days.
+    modulations : sequence of array-like, default ()
+        Positive series on ``index``.
 
     Returns
     -------
-    list of tuple
-        ``(weight, signed_offset_m)`` per image, the offset along the left row normal.
+    shapes : ndarray
+        Shape ``(len(index), K)``; column 0 is ``q``.
+    initial : ndarray
+        Steady pre-period value of every shape, shape ``(K,)``.
     """
-    canal_lines = [
-        (strength, boundary if side == "left" else -boundary)
-        for strength, boundary, side in _parse_image_specs(r_mirrorwel)
-    ]
-    is_strip = sorted(np.sign(offset) for _, offset in canal_lines) == [-1.0, 1.0]
-    if n_reflections == 1 or not is_strip:
-        return [(strength, 2.0 * offset) for strength, offset in canal_lines]
-
-    offsets = []
-    for first, second in (canal_lines, canal_lines[::-1]):
-        weight, offset = 1.0, 0.0
-        for order in range(n_reflections):
-            strength, canal_offset = first if order % 2 == 0 else second
-            weight *= strength
-            offset = 2.0 * canal_offset - offset
-            offsets.append((weight, offset))
-    return offsets
+    q = np.asarray(q_per_well_m3d, dtype=float)
+    base = np.column_stack([q, lagged_histories(index, q, time_constants_d, initial_q_m3d)])
+    base_initial = np.full(base.shape[1], float(initial_q_m3d))
+    shapes, initial = [base], [base_initial]
+    for modulation in modulations:
+        relative = np.asarray(modulation, dtype=float) / np.mean(modulation) - 1.0
+        shapes.append(base * relative[:, None])
+        initial.append(base_initial * relative[0])
+    return np.hstack(shapes), np.concatenate(initial)
 
 
-def image_wells(xy, normals, offsets):
-    """Real wells and their canal image wells.
+def bed_resistance(coefficients, index, t_bodem_degc, r_bed_12c_d_per_m):
+    """Canal-bed resistance over time.
+
+    ``R(t) = R_12 * viscratio(T_bodem)`` with the WVPT reference temperature, so ``R = R_12`` at
+    12 degC. Gaps in ``T_bodem`` are interpolated in time; missing values at the ends are filled
+    with the nearest value, with a warning. An empty (NaN) ``R_12`` means a fixed head: ``R = 0``.
 
     Parameters
     ----------
-    xy : array-like
-        Real-well coordinates, shape ``(n, 2)``.
-    normals : array-like
-        Left-pointing unit normals of the wells from :func:`well_row_normals`, shape ``(n, 2)``.
-    offsets : list of tuple
-        ``(weight, signed_offset_m)`` per image from :func:`image_offsets`.
+    coefficients : pandas.Series
+        Calibrated transient WVP coefficients (``.wvpt`` accessor).
+    index : pandas.DatetimeIndex
+        Model times.
+    t_bodem_degc : array-like
+        Infiltration-water temperature in degC on ``index``.
+    r_bed_12c_d_per_m : float
+        Bed resistance at 12 degC in d/m (head drop per infiltration per metre of shore, m2/d).
 
     Returns
     -------
-    sources : ndarray
-        Real wells followed by one image per well per offset, shape ``(n * (1 + len(offsets)), 2)``.
-    strengths : ndarray
-        ``+1`` for real wells and the image weight for images.
+    ndarray
+        Bed resistance in d/m, shape ``(len(index),)``.
     """
-    xy = np.asarray(xy, dtype=float)
-    normals = np.asarray(normals, dtype=float)
-    sources = np.concatenate([xy] + [xy + offset * normals for _, offset in offsets])
-    strengths = np.repeat([1.0] + [weight for weight, _ in offsets], xy.shape[0])
-    return sources, strengths
+    index = pd.DatetimeIndex(index)
+    if not np.isfinite(r_bed_12c_d_per_m):
+        return np.zeros(index.size)
+    temperature = pd.Series(np.asarray(t_bodem_degc, dtype=float), index=index)
+    filled = temperature.interpolate(method="time", limit_area="inside")
+    if filled.isna().all():
+        msg = "T_bodem has no values"
+        raise ValueError(msg)
+    if filled.isna().any():
+        warnings.warn(
+            f"T_bodem is missing at {filled.isna().sum()} leading or trailing times; filled with the nearest value",
+            stacklevel=2,
+        )
+        filled = filled.ffill().bfill()
+    return r_bed_12c_d_per_m * coefficients.wvpt.viscratio(index, filled.to_numpy()).to_numpy(dtype=float)
 
 
-def canal_mask(gx, gy, xy, canals):
-    """Mask grid points beyond a canal.
+def strip_bed_resistance(drop_m, flow_per_m_m2d, kd_m2_per_d, leakage_resistance_d, canal_offsets_m):
+    """Bed resistance that gives a head drop over the bed of the nearest canal of a 1D strip.
 
-    A point is beyond a canal when its offset from the nearest real well, measured along that
-    well's outward normal, exceeds the canal distance. The image method gives non-physical heads
-    there.
+    The row is a line source ``flow_per_m`` (m2/d) at ``y = 0`` in a leaky aquifer; each canal is a
+    line-sink at its offset whose infiltration ``sigma`` obeys ``s = R sigma`` (``s`` drawdown). The
+    drawdown of a line source is ``Q' lambda / (2 kD) exp(-|y| / lambda)``. For one canal, or two at
+    the same distance ``b``, ``R = D (1 + e^{-2b/lambda}) / (Q' e^{-b/lambda} - 2 kD D / lambda)``
+    (drop the ``e^{-2b/lambda}`` term for one canal); in general ``R`` is the root of the drop on the
+    nearest canal. The drop cannot exceed ``Q' lambda e^{-b/lambda} / (2 kD)`` (``R`` to infinity).
 
     Parameters
     ----------
-    gx, gy : array-like
-        Grid coordinates (same shape).
-    xy : array-like
-        Real-well coordinates, shape ``(n, 2)``.
-    canals : list of tuple
-        Canal sides from :func:`canal_sides`.
+    drop_m : float
+        Head drop over the bed of the nearest canal in meters.
+    flow_per_m_m2d : float
+        Row flow per metre of row in m2/d.
+    kd_m2_per_d : float
+        Transmissivity in m2/d.
+    leakage_resistance_d : float
+        Leakage resistance in days.
+    canal_offsets_m : array-like
+        Signed canal offsets from the row in meters.
 
     Returns
     -------
-    ndarray of bool
-        True beyond a canal, shape of ``gx``.
+    float
+        Bed resistance in d/m, NaN when the drop is not reachable.
     """
-    xy = np.asarray(xy, dtype=float)
-    points = np.column_stack([np.ravel(gx), np.ravel(gy)])
-    nearest = cdist(points, xy).argmin(axis=1)
-    offset = points - xy[nearest]
-    mask = np.zeros(points.shape[0], dtype=bool)
-    for _, boundary, normals in canals:
-        mask |= np.einsum("ij,ij->i", offset, normals[nearest]) > boundary
-    return mask.reshape(np.shape(gx))
+    leakage_factor = np.sqrt(kd_m2_per_d * leakage_resistance_d)
+    offsets = np.asarray(canal_offsets_m, dtype=float)
+    unit_drawdown = leakage_factor / (2.0 * kd_m2_per_d)
+    coupling = unit_drawdown * np.exp(-np.abs(offsets[:, None] - offsets[None, :]) / leakage_factor)
+    forcing = flow_per_m_m2d * unit_drawdown * np.exp(-np.abs(offsets) / leakage_factor)
+    nearest = np.argmin(np.abs(offsets))
+    if drop_m >= forcing[nearest]:
+        return np.nan
+
+    def excess_drop(resistance):
+        infiltration = np.linalg.solve(coupling + resistance * np.eye(offsets.size), forcing)
+        return resistance * infiltration[nearest] - drop_m
+
+    upper = 1.0
+    while excess_drop(upper) < 0.0:
+        upper *= 2.0
+    return brentq(excess_drop, 0.0, upper, xtol=1e-15, rtol=4.0 * np.finfo(float).eps)
 
 
 def distance_table(coefficients, index, q_per_well_m3d, radii, *, initial_condition, integration_method="kd_grid"):
@@ -1091,46 +1128,245 @@ def distance_table(coefficients, index, q_per_well_m3d, radii, *, initial_condit
     ])
 
 
-def drawdown_field(table_rows, radii, sources, strengths, gx, gy, well_radius_m, *, max_elements=5_000_000):
-    """Superposed drawdown of all sources on a grid.
+def radial_kernel(points, sources, strengths, radii, well_radius_m, *, max_elements=20_000_000):
+    """Precomputed spatial kernel of distance tables.
+
+    A table row is interpolated in ``ln r`` by a not-a-knot cubic spline, which is linear in the
+    row values: ``s(r) = sum_j card_j(ln r) table_j`` with the cardinal splines ``card_j``. The
+    drawdown at point ``x`` of sources ``m`` with strengths ``S[m, k]`` on tables ``k`` is then
+    ``sum_j sum_k table[j, k] G[x, j, k]`` with ``G[x, j, k] = sum_m card_j(ln d_xm) S[m, k]``, so
+    the field for any set of times is ``tables.reshape(n_times, -1) @ G.reshape(len(points), -1).T``.
 
     Parameters
     ----------
-    table_rows : array-like
-        Rows of :func:`distance_table` for the selected times, shape ``(n_times, len(radii))``.
-    radii : array-like
-        Increasing table distances in meters, starting at the well radius.
+    points : array-like
+        Evaluation points, shape ``(n, 2)``.
     sources : array-like
         Source coordinates, shape ``(m, 2)``.
     strengths : array-like
-        Source strengths, shape ``(m,)``.
-    gx, gy : array-like
-        Grid coordinates (same shape).
+        Strength of every source per table, shape ``(m, K)``.
+    radii : array-like
+        Increasing table distances in meters, starting at the well radius.
     well_radius_m : float
         Distances are clipped at the well radius.
-    max_elements : int, default 5_000_000
-        Grid points are processed in chunks of at most this many (point, source) distances, which
-        bounds memory when repeated reflections add many image wells.
+    max_elements : int, default 20_000_000
+        Points are processed in chunks of at most this many (point, source, radius) values.
 
     Returns
     -------
     ndarray
-        Drawdown in positive meters, shape ``(n_times, *gx.shape)``.
+        Kernel ``G``, shape ``(n, len(radii), K)``.
     """
-    points = np.column_stack([np.ravel(gx), np.ravel(gy)])
-    sources = np.asarray(sources, dtype=float)
-    splines = [CubicSpline(np.log(radii), row) for row in table_rows]
-    field = np.empty((len(splines), points.shape[0]))
-    chunk = max(1, max_elements // sources.shape[0])
+    points = np.asarray(points, dtype=float).reshape(-1, 2)
+    sources = np.asarray(sources, dtype=float).reshape(-1, 2)
+    strengths = np.asarray(strengths, dtype=float).reshape(sources.shape[0], -1)
+    radii = np.asarray(radii, dtype=float)
+    cardinal = CubicSpline(np.log(radii), np.eye(radii.size))
+    kernel = np.empty((points.shape[0], radii.size, strengths.shape[1]))
+    chunk = max(1, max_elements // (sources.shape[0] * radii.size))
     for start in range(0, points.shape[0], chunk):
         distance = np.maximum(cdist(points[start : start + chunk], sources), well_radius_m)
         if distance.max() > radii[-1]:
             msg = f"Largest source distance {distance.max():.1f} m exceeds the table range {radii[-1]:.1f} m"
             raise ValueError(msg)
-        log_distance = np.log(distance)
-        for i, spline in enumerate(splines):
-            field[i, start : start + chunk] = spline(log_distance) @ strengths
-    return field.reshape(len(splines), *np.shape(gx))
+        kernel[start : start + chunk] = np.tensordot(cardinal(np.log(distance)), strengths, axes=([1], [0]))
+    return kernel
+
+
+def legendre_orders(lengths_m, *, order_spacing_m=80.0, max_order=20):
+    """Legendre order per shore piece: ``clip(round(L / order_spacing_m), 2, max_order)``."""
+    return np.clip(np.round(np.asarray(lengths_m, dtype=float) / order_spacing_m).astype(int), 2, max_order)
+
+
+def _legendre_basis(lines, orders, fractions_per_line):
+    """Points on lines and their block Legendre basis.
+
+    Returns the points, the line index of each point and the matrix ``P[i, col]`` with
+    ``P_n(2 f_i - 1)`` in column ``offset[line_i] + n`` for ``n <= orders[line_i]``.
+    """
+    line = np.repeat(np.arange(len(lines)), [f.size for f in fractions_per_line])
+    fraction = np.concatenate(fractions_per_line)
+    points = shapely.get_coordinates(shapely.line_interpolate_point(lines[line], fraction, normalized=True))
+    offsets = np.concatenate([[0], np.cumsum(orders + 1)])
+    degree = np.arange(orders.max() + 1)
+    valid = degree[None, :] <= orders[line][:, None]
+    rows, cols = np.nonzero(valid)
+    vander = np.polynomial.legendre.legvander(2.0 * fraction - 1.0, orders.max())
+    basis = np.zeros((fraction.size, offsets[-1]))
+    basis[rows, offsets[line][rows] + cols] = vander[valid]
+    return points, line, basis
+
+
+def linesink_nodes(sinks, orders, spacing_m):
+    """Point sinks at about ``spacing_m`` along the sink lines and their Legendre basis.
+
+    Parameters
+    ----------
+    sinks : array-like of shapely.LineString
+        Sink lines.
+    orders : array-like of int
+        Legendre order per line.
+    spacing_m : float
+        Largest node spacing in meters; each line gets equal spacings ``h`` with nodes at the
+        midpoints.
+
+    Returns
+    -------
+    nodes : ndarray
+        Node coordinates, shape ``(n, 2)``.
+    line : ndarray of int
+        Line index of every node.
+    basis : ndarray
+        ``h * P_n(xi)`` per node and basis function (pumping of a node per unit coefficient, m).
+    """
+    sinks = np.asarray(sinks)
+    lengths = shapely.length(sinks)
+    counts = np.maximum(np.ceil(lengths / spacing_m).astype(int), 1)
+    fractions = [(np.arange(count) + 0.5) / count for count in counts]
+    nodes, line, basis = _legendre_basis(sinks, np.asarray(orders), fractions)
+    return nodes, line, basis * (lengths / counts)[line][:, None]
+
+
+def solve_transient_linesinks(
+    tables,
+    radii,
+    wells_xy,
+    shores,
+    shapes,
+    bed_resistance_d_per_m,
+    well_radius_m,
+    *,
+    sink_offset_m=0.5,
+    order_spacing_m=80.0,
+    max_order=20,
+    svd_rtol=1e-12,
+    max_elements=20_000_000,
+):
+    """Transient Legendre line-sinks along shores with a bed resistance.
+
+    Each shore piece gets a sink line ``sink_offset_m`` into the water with point sinks every
+    ``sink_offset_m / 2`` and Legendre polynomials up to :func:`legendre_orders`. The drawdown at
+    ``3 (N + 1)`` cosine-spaced control points on every shore (both ends included) must satisfy
+    ``s = R(t) q'`` at every time, with ``q' = -sum_n sum_p a_np P_n phi_p(t)`` the infiltration per
+    metre. The least-squares problem over all times is compressed exactly: every time row is linear
+    in the time functions (table rows and ``R phi``), so their SVD ``U s V^T`` gives the same normal
+    equations with the pseudo-times ``s V^T`` (singular values below ``svd_rtol`` times the largest
+    dropped). The rows are reduced block-wise by QR and solved with scaled columns.
+
+    Parameters
+    ----------
+    tables : array-like
+        :func:`distance_table` of every shape, shape ``(n_times, len(radii), K)``; shape 0 is the
+        well flow ``q``.
+    radii : array-like
+        Table distances in meters.
+    wells_xy : array-like
+        Well coordinates, shape ``(n_wells, 2)``; each pumps shape 0.
+    shores : array-like of shapely.LineString
+        Shore pieces, water on the left (:func:`facing_shores`).
+    shapes : array-like
+        Time shapes ``phi_p`` in m3/d, shape ``(n_times, K)``.
+    bed_resistance_d_per_m : array-like
+        Bed resistance ``R(t)`` in d/m (:func:`bed_resistance`), shape ``(n_times,)``.
+    well_radius_m : float
+        Distances are clipped at the well radius.
+    sink_offset_m : float, default 0.5
+        Distance of the sink line into the water in meters.
+    order_spacing_m, max_order : float, int
+        Legendre order per piece, see :func:`legendre_orders`.
+    svd_rtol : float or None, default 1e-12
+        Relative singular-value cutoff of the time compression; None solves on all times.
+    max_elements : int, default 20_000_000
+        Memory bound of the kernel chunks and of the least-squares blocks.
+
+    Returns
+    -------
+    dict
+        ``sinks`` (sink lines), ``orders``, ``coefficients`` (``a``, shape ``(K, n_basis)``),
+        ``controls`` (shape ``(n_controls, 2)``), ``control_piece``, ``inflow_per_m`` (``q'`` at the
+        controls in m2/d, shape ``(n_times, n_controls)``) and ``shore_residual_m``
+        (``s - R q'`` at the controls in m, same shape).
+    """
+    tables = np.asarray(tables, dtype=float)
+    n_times, n_radii, n_shapes = tables.shape
+    shapes = np.asarray(shapes, dtype=float).reshape(n_times, n_shapes)
+    resistance = np.asarray(bed_resistance_d_per_m, dtype=float).reshape(n_times)
+    shores = np.asarray(shores)
+    orders = legendre_orders(shapely.length(shores), order_spacing_m=order_spacing_m, max_order=max_order)
+    sinks = shapely.offset_curve(shores, sink_offset_m)
+
+    nodes, _, node_basis = linesink_nodes(sinks, orders, sink_offset_m / 2.0)
+    counts = 3 * (orders + 1)
+    fractions = [(1.0 - np.cos(np.pi * np.arange(count) / (count - 1))) / 2.0 for count in counts]
+    controls, control_piece, control_basis = _legendre_basis(shores, orders, fractions)
+    kernel_sinks = radial_kernel(controls, nodes, node_basis, radii, well_radius_m, max_elements=max_elements)
+    kernel_wells = radial_kernel(
+        controls, wells_xy, np.ones(len(wells_xy)), radii, well_radius_m, max_elements=max_elements
+    )[..., 0]
+
+    time_functions = np.column_stack([tables.reshape(n_times, -1), resistance[:, None] * shapes])
+    if svd_rtol is not None:
+        _, singular_values, vt = np.linalg.svd(time_functions, full_matrices=False)
+        keep = singular_values > svd_rtol * singular_values[0]
+        time_functions = singular_values[keep, None] * vt[keep]
+
+    n_controls, n_basis = control_basis.shape
+    n_columns = n_shapes * n_basis
+    # At least as many rows per block as columns, else each QR costs more than the rows it adds.
+    block = max(-(-(n_columns + 1) // n_controls), max_elements // (n_controls * (n_columns + 1)))
+    triangle = np.empty((0, n_columns + 1))
+    for start in range(0, time_functions.shape[0], block):
+        rows = time_functions[start : start + block]
+        table_rows = rows[:, : n_radii * n_shapes].reshape(-1, n_radii, n_shapes)
+        system = np.einsum("tjk,cjn->tckn", table_rows, kernel_sinks, optimize=True)
+        system += rows[:, None, n_radii * n_shapes :, None] * control_basis[None, :, None, :]
+        rhs = -table_rows[:, :, 0] @ kernel_wells.T
+        stacked = np.column_stack([system.reshape(-1, n_columns), rhs.reshape(-1)])
+        triangle = np.linalg.qr(np.vstack([triangle, stacked]), mode="r")
+    scale = np.linalg.norm(triangle[:, :-1], axis=0)
+    scale[scale == 0.0] = 1.0
+    coefficients = (np.linalg.lstsq(triangle[:, :-1] / scale, triangle[:, -1], rcond=None)[0] / scale).reshape(
+        n_shapes, n_basis
+    )
+
+    control_kernel = np.einsum("cjn,kn->cjk", kernel_sinks, coefficients)
+    control_kernel[:, :, 0] += kernel_wells
+    drawdown = tables.reshape(n_times, -1) @ control_kernel.reshape(n_controls, -1).T
+    inflow_per_m = -shapes @ (control_basis @ coefficients.T).T
+    return {
+        "sinks": sinks,
+        "orders": orders,
+        "coefficients": coefficients,
+        "controls": controls,
+        "control_piece": control_piece,
+        "inflow_per_m": inflow_per_m,
+        "shore_residual_m": drawdown - resistance[:, None] * inflow_per_m,
+    }
+
+
+def linesink_sources(solution, spacing_m):
+    """Point sinks of a solved line-sink model for field evaluation.
+
+    Parameters
+    ----------
+    solution : dict
+        Result of :func:`solve_transient_linesinks`.
+    spacing_m : float
+        Largest node spacing in meters. Fields closer than about this distance to a sink line
+        (in the water) are not resolved.
+
+    Returns
+    -------
+    nodes : ndarray
+        Node coordinates, shape ``(n, 2)``.
+    piece : ndarray of int
+        Shore piece of every node.
+    strengths : ndarray
+        Pumping of every node per shape (negative = infiltration), shape ``(n, K)``, in the table
+        unit; the infiltration of a set of nodes is ``-shapes @ strengths[nodes].sum(axis=0)``.
+    """
+    nodes, piece, basis = linesink_nodes(solution["sinks"], solution["orders"], spacing_m)
+    return nodes, piece, basis @ solution["coefficients"].T
 
 
 # --------------------------------------------------------------------------- #
