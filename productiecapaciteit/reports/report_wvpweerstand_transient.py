@@ -33,6 +33,7 @@ fraction of the data. The diagnostic plot shows the residuals and their
 innovations (first differences) on the same axis.
 """
 
+import itertools
 import logging
 import tempfile
 import warnings
@@ -44,6 +45,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse
 import shapely
+import shapely.ops
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import CubicSpline
 from scipy.optimize import brentq, least_squares
@@ -922,6 +924,47 @@ def facing_shores(xy, water, search_m, *, edge_m, min_length_m=20.0, eps_m=0.05)
     shores, merged_index = shapely.get_parts(merged, return_index=True)
     long_enough = shapely.length(shores) >= min_length_m
     return shores[long_enough], kept_bodies[merged_index[long_enough]]
+
+
+def split_shores(shores, wells_xy, *, scale=1.0, min_m=20.0, max_m=160.0):
+    """Cut shore pieces into sub-pieces no longer than ``scale`` times their distance to the wells.
+
+    The head along a shore varies on the scale of its distance to the nearest well, so a
+    low-order Legendre basis per sub-piece resolves it where one global basis per piece cannot
+    (wiggly banks close to the wells). A sub-piece starting at distance ``d`` from the nearest well
+    is ``clip(scale * d, min_m, max_m)`` long; a last remainder shorter than ``min_m / 2`` is added
+    to the sub-piece before it.
+
+    Parameters
+    ----------
+    shores : array-like of shapely.LineString
+        Shore pieces (:func:`facing_shores`).
+    wells_xy : array-like
+        Well coordinates, shape ``(n, 2)``.
+    scale : float, default 1.0
+        Sub-piece length relative to the distance to the nearest well.
+    min_m, max_m : float, default 20.0 and 160.0
+        Shortest and longest sub-piece in meters.
+
+    Returns
+    -------
+    pieces : ndarray of shapely.LineString
+        Sub-pieces in order along each shore, with its direction.
+    parent : ndarray of int
+        Index of the shore piece of every sub-piece.
+    """
+    wells = shapely.multipoints(np.asarray(wells_xy, dtype=float))
+    pieces, parent = [], []
+    for i, line in enumerate(shores):
+        cuts = [0.0]
+        while cuts[-1] < line.length:
+            distance = shapely.distance(line.interpolate(cuts[-1]), wells)
+            cuts.append(min(cuts[-1] + np.clip(scale * distance, min_m, max_m), line.length))
+        if len(cuts) > 2 and cuts[-1] - cuts[-2] < 0.5 * min_m:
+            del cuts[-2]
+        pieces += [shapely.ops.substring(line, start, end) for start, end in itertools.pairwise(cuts)]
+        parent += [i] * (len(cuts) - 1)
+    return np.array(pieces), np.array(parent)
 
 
 def lagged_histories(index, values, time_constants_d, initial_value):

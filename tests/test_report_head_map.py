@@ -18,6 +18,7 @@ from productiecapaciteit.reports.report_wvpweerstand_transient import (
     radial_kernel,
     row_segments,
     solve_transient_linesinks,
+    split_shores,
     strip_bed_resistance,
     time_shapes,
     well_row_normals,
@@ -637,6 +638,31 @@ def test_prepare_water_closes_a_bridge_gap():
     assert len(shores) == 1
     assert bodies.tolist() == [0]
     assert shores[0].length == pytest.approx(700.0, abs=1.0)  # the closing cuts the corners by a few decimeters
+
+
+def test_split_shores_cuts_pieces_by_their_distance_to_the_wells():
+    # Sub-pieces start where the previous one ends, are at most clip(scale * d, 20, 160) m long with d
+    # the distance from their start to the nearest well (the last may absorb a short remainder), and
+    # keep the length and direction of their parent.
+    shores = np.array([shapely.LineString([(-900, 60), (1500, 60)]), shapely.LineString([(650, -30), (650, -300)])])
+
+    pieces, parent = split_shores(shores, XY, scale=0.8)
+
+    assert parent.tolist() == sorted(parent.tolist())
+    assert set(parent.tolist()) == {0, 1}
+    for p, shore in enumerate(shores):
+        own = pieces[parent == p]
+        coords = [shapely.get_coordinates(piece) for piece in own]
+        np.testing.assert_allclose([c[0] for c in coords[1:]], [c[-1] for c in coords[:-1]], atol=1e-9)
+        np.testing.assert_allclose(coords[0][0], shapely.get_coordinates(shore)[0], atol=1e-9)
+        assert shapely.length(own).sum() == pytest.approx(shore.length, abs=1e-6)
+        start = shapely.points([c[0] for c in coords])
+        limit = np.clip(0.8 * shapely.distance(start, shapely.multipoints(XY)), 20.0, 160.0)
+        assert np.all(shapely.length(own)[:-1] <= limit[:-1] + 1e-9)
+        assert shapely.length(own)[-1] <= limit[-1] + 10.0
+    assert shapely.length(pieces).min() >= 10.0
+    assert shapely.length(pieces[parent == 0]).min() < 60.0  # near the wells
+    assert shapely.length(pieces[parent == 0]).max() > 150.0  # far from the wells
 
 
 # --------------------------------------------------------------------------- #
