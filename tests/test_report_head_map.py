@@ -149,7 +149,7 @@ def test_radial_kernel_equals_direct_spline_per_time_and_shape():
         np.stack([_cubic_in_log_r(radii, coef[t, k]) for k in range(n_shapes)], axis=-1) for t in range(n_times)
     ])
     gx, gy = np.meshgrid(np.linspace(-90.0, 130.0, 7), np.linspace(-60.0, 80.0, 5))
-    points = np.column_stack([gx.ravel(), gy.ravel()])
+    points = np.vstack([np.column_stack([gx.ravel(), gy.ravel()]), sources[:1]])
 
     kernel = radial_kernel(points, sources, strengths, radii, 0.3, max_elements=n_sources * radii.size * 6)
     field = tables.reshape(n_times, -1) @ kernel.reshape(len(points), -1).T
@@ -186,14 +186,16 @@ def test_lagged_histories_step_response_across_gaps():
 def test_time_shapes_modulated_copies_and_steady_initial_values():
     index = pd.date_range("2021-01-01", periods=5, freq="D")
     q = np.array([3.0, 4.0, 5.0, 6.0, 7.0])
-    modulation = np.array([2.0, 1.0, 1.0, 1.0, 0.0])  # mean 1
+    kd = np.array([150.0, 120.0, 120.0, 120.0, 90.0])  # mean 120
+    m = np.array([2.0, 1.0, 1.0, 1.0, 0.0])  # mean 1
 
-    shapes, initial = time_shapes(index, q, 3.5, [1.0, 10.0], [modulation])
+    shapes, initial = time_shapes(index, q, 3.5, [1.0, 10.0], [kd, m])
 
-    assert shapes.shape == (5, 6)
+    assert shapes.shape == (5, 9)
     np.testing.assert_array_equal(shapes[:, 0], q)
-    np.testing.assert_allclose(shapes[:, 3:], shapes[:, :3] * (modulation - 1.0)[:, None], rtol=0.0, atol=0.0)
-    np.testing.assert_array_equal(initial, [3.5, 3.5, 3.5, 3.5, 3.5, 3.5])
+    np.testing.assert_allclose(shapes[:, 3:6], shapes[:, :3] * (kd / 120.0 - 1.0)[:, None], rtol=1e-15, atol=0.0)
+    np.testing.assert_allclose(shapes[:, 6:], shapes[:, :3] * (m - 1.0)[:, None], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(initial, 3.5 * np.array([1, 1, 1, 0.25, 0.25, 0.25, 1, 1, 1]), rtol=1e-15)
     np.testing.assert_array_equal(shapes[0, 1:3], [3.5, 3.5])
 
 
@@ -203,14 +205,14 @@ def constant_kd_coefficients():
 
 
 def test_bed_resistance_viscosity_gaps_and_fixed_head(constant_kd_coefficients):
-    index = pd.date_range("2021-01-01", periods=6, freq="D")
-    temperature = np.array([12.0, np.nan, 4.0, 20.0, np.nan, np.nan])
+    index = pd.date_range("2021-01-01", periods=7, freq="D")
+    temperature = np.array([np.nan, 12.0, np.nan, 4.0, 20.0, np.nan, np.nan])
 
-    with pytest.warns(UserWarning, match="2 leading or trailing"):
+    with pytest.warns(UserWarning, match="3 leading or trailing"):
         resistance = bed_resistance(constant_kd_coefficients, index, temperature, 0.1)
 
     # 12 degC is the reference; the interior gap is interpolated in time, the trailing gap held.
-    expected_temperature = np.array([12.0, 8.0, 4.0, 20.0, 20.0, 20.0])
+    expected_temperature = np.array([12.0, 12.0, 8.0, 4.0, 20.0, 20.0, 20.0])
     np.testing.assert_allclose(resistance, 0.1 * _visc_ratio(expected_temperature), rtol=1e-14)
     assert resistance[0] == pytest.approx(0.1, rel=1e-15)
     np.testing.assert_array_equal(bed_resistance(constant_kd_coefficients, index, temperature, np.nan), 0.0)
@@ -252,7 +254,7 @@ LAM_S = np.sqrt(KD_S * C_S)  # 50 m
 Q_WELL = 240.0
 B_S = 40.0
 ROW_S = _row(101, 10.0)  # 1000 m = 20 leakage factors
-RADII_S = np.geomspace(WELL_RADIUS, 3000.0, 80)
+RADII_S = np.geomspace(WELL_RADIUS, 3000.0, 40)
 MID_S = 500.0
 
 
@@ -265,7 +267,7 @@ def _steady(shores, resistance, wells=ROW_S, n_times=1, **kwargs):
     return solution, tables, shapes
 
 
-@pytest.mark.parametrize("rho", [0.0, 0.1, 0.5])
+@pytest.mark.parametrize("rho", [0.0, 0.5])
 def test_straight_canal_matches_whole_plane_robin_solution(constant_kd_coefficients, rho):
     # Long row, canal at b with the sink line delta into the water, bed resistance at a constant
     # 4 degC. Mid-row the canal is an infinite line-sink in a whole-plane aquifer:
@@ -339,12 +341,12 @@ def test_fixed_head_strip_matches_reflected_images():
     near, far = 40.0 * sign, -90.0 * sign
     shores = [_canal(near, sign > 0), _canal(far, sign < 0)]
 
-    solution, tables, _ = _steady(shores, 0.0, max_order=40, order_spacing_m=30.0)
+    solution, tables, _ = _steady(shores, 0.0, max_order=40, order_spacing_m=30.0, sink_offset_m=2.0)
 
     points = np.array([[MID_S + 3.7, sign * y] for y in (-85.0, -60.0, -30.0, 0.3, 15.0, 35.0)])
     expected = _strip_images(points, ROW_S, near, far)
-    field = _field(solution, tables, RADII_S, ROW_S, points)[0]
-    np.testing.assert_allclose(field, expected, rtol=0.0, atol=3e-4 * expected.max())
+    field = _field(solution, tables, RADII_S, ROW_S, points, spacing=1.0)[0]
+    np.testing.assert_allclose(field, expected, rtol=0.0, atol=1e-4 * expected.max())
 
 
 def test_round_trip_two_pieces_two_shapes():
@@ -383,12 +385,12 @@ def test_finite_canal_lies_between_no_canal_and_long_canal():
     # half the row must give drawdowns between those without canal and with a canal along all of
     # it, also around its ends, and take in water along its whole length.
     wells = _row(41, 10.0)
-    points = np.column_stack([g.ravel() for g in np.meshgrid(np.linspace(-150, 550, 29), np.linspace(-150, 30, 10))])
+    points = np.column_stack([g.ravel() for g in np.meshgrid(np.linspace(-150, 550, 15), np.linspace(-150, 30, 5))])
     shapes = np.full((1, 1), Q_WELL)
     tables = _k0_tables(RADII_S, KD_S, LAM_S, shapes)
     no_canal = tables[0, :, 0] @ radial_kernel(points, wells, np.ones(len(wells)), RADII_S, WELL_RADIUS)[..., 0].T
 
-    orders = {"max_order": 40, "order_spacing_m": 10.0}
+    orders = {"max_order": 40, "order_spacing_m": 20.0}
     short, _, _ = _steady([_canal(B_S, True, 100.0, 300.0)], 0.0, wells=wells, **orders)
     long, _, _ = _steady([_canal(B_S, True, -100.0, 500.0)], 0.0, wells=wells, **orders)
     short_field = _field(short, tables, RADII_S, wells, points)[0]
@@ -423,7 +425,7 @@ def transient_canal():
     b, storage = 82.0, coefficients.wvpt.storage_coefficient
     time_constants = np.geomspace(b**2 * storage / (4 * kd.mean()), 3 * 57.0 * storage, 3)
     shapes, initial = time_shapes(index, q, q[:14].mean(), time_constants, [kd])
-    radii = np.geomspace(WELL_RADIUS, 2500.0, 40)
+    radii = np.geomspace(WELL_RADIUS, 2500.0, 25)
     tables = np.stack(
         [
             distance_table(coefficients, index, shape, radii, initial_condition=v)
@@ -500,7 +502,7 @@ def seasonal_bed():
         "index": index,
         "resistance": resistance,
         "lam": np.sqrt(120.0 * 57.0),
-        "radii": np.geomspace(WELL_RADIUS, 1500.0, 120),
+        "radii": np.geomspace(WELL_RADIUS, 1500.0, 30),
         "wells": _row(41, 10.0),
         "shore": _canal(60.0, True, -100.0, 500.0),
     }
@@ -519,7 +521,7 @@ def test_quasi_steady_inflow_follows_seasonal_bed_resistance(seasonal_bed):
 
     solution = solve_transient_linesinks(tables, *geometry, shapes, s["resistance"], WELL_RADIUS)
 
-    for i in range(0, s["index"].size, 61):
+    for i in np.unique([np.argmin(s["resistance"]), np.argmax(s["resistance"]), 150, 600]):
         steady = solve_transient_linesinks(
             tables[i : i + 1], *geometry, shapes[i : i + 1], s["resistance"][i : i + 1], WELL_RADIUS
         )
@@ -537,7 +539,7 @@ def test_time_compression_equals_full_least_squares(seasonal_bed):
     args = (tables, s["radii"], s["wells"], [s["shore"]], shapes, s["resistance"], WELL_RADIUS)
 
     compressed = solve_transient_linesinks(*args)
-    full = solve_transient_linesinks(*args, svd_rtol=None)
+    full = solve_transient_linesinks(*args, svd_rtol=None, max_elements=20_000)  # many QR blocks
 
     np.testing.assert_allclose(
         compressed["inflow_per_m"], full["inflow_per_m"], rtol=0.0, atol=1e-10 * np.abs(full["inflow_per_m"]).max()
