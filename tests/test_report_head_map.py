@@ -15,6 +15,7 @@ from productiecapaciteit.reports.report_wvpweerstand_transient import (
     drawdown_from_kernel,
     facing_shores,
     infiltration_by_body_and_side,
+    initial_bed_resistances,
     lagged_histories,
     linesink_sources,
     map_sources,
@@ -268,6 +269,27 @@ def test_strip_bed_resistance_unequal_canals_and_unreachable_drop():
 
     reachable = flow_per_m * unit * np.exp(-82.0 / lam)
     assert np.isnan(strip_bed_resistance(1.01 * reachable, flow_per_m, kd, leakage_resistance, offsets))
+
+
+def test_initial_bed_resistances_from_config_and_sheets():
+    # Q' = Q95 * 24 / (nput dx); one canal at 82 m gives the one-canal closed form, an unreachable
+    # drop and a strang without a sheet give NaN.
+    config = pd.DataFrame(
+        {"nput": [41.0, 23.0, 30.0], "dx_tussenputten": [10.0, 45.0, 15.0], "r_mirrorwel": [[(-1, 82, "left")]] * 3},
+        index=["Q300", "IK96", "IK91"],
+    )
+    sheet = default_transient_coefficients(
+        kd_ref_m2_per_d=122.0, leakage_resistance_d=57.0, series_flow_ref_m3_per_h=288.0
+    )
+    tiny = default_transient_coefficients(kd_ref_m2_per_d=48.0, leakage_resistance_d=4.9, series_flow_ref_m3_per_h=82.0)
+
+    resistances = initial_bed_resistances(config, {"Q300": sheet, "IK96": tiny})
+
+    lam, flow_per_m = np.sqrt(122.0 * 57.0), 288.0 * 24.0 / 410.0
+    expected = 0.5 / (flow_per_m * np.exp(-82.0 / lam) - 2 * 122.0 * 0.5 / lam)
+    assert resistances["Q300"] == pytest.approx(expected, rel=1e-12)
+    assert np.isnan(resistances["IK96"])
+    assert np.isnan(resistances["IK91"])
 
 
 # --------------------------------------------------------------------------- #

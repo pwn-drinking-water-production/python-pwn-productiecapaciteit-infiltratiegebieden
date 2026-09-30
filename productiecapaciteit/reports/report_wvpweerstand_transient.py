@@ -63,6 +63,7 @@ from productiecapaciteit.src.weerstand_pandasaccessors import (
 from productiecapaciteit.src.wvp_transient_funs import (
     CANAL_SIDES,
     build_multiwell_geometry,
+    crosssection_image_offsets,
     infer_lower_timestep,
     objective,
 )
@@ -1131,6 +1132,43 @@ def strip_bed_resistance(drop_m, flow_per_m_m2d, kd_m2_per_d, leakage_resistance
     while excess_drop(upper) < 0.0:
         upper *= 2.0
     return brentq(excess_drop, 0.0, upper, xtol=1e-15, rtol=4.0 * np.finfo(float).eps)
+
+
+def initial_bed_resistances(config, sheets, drop_m=0.5):
+    """Bed resistance per strang that gives a head drop over the nearest canal bed at Q95.
+
+    Uses :func:`strip_bed_resistance` with the calibrated ``kD_ref`` and leakage resistance, the
+    canals of ``r_mirrorwel`` and the row as a line source ``Q' = Q95 * 24 / (nput * dx)`` with Q95
+    the sheet's ``series_flow_ref_m3_per_h``. The ``R_bed_12C_d_per_m`` row of strang_props7.csv was
+    produced with it (``drop_m = 0.5``) from the recalibrated WVPT workbook.
+
+    Parameters
+    ----------
+    config : pandas.DataFrame
+        Strang configuration (:func:`get_config`), one row per strang.
+    sheets : dict
+        Transient WVP coefficient sheet per strang (:func:`read_series_workbook`).
+    drop_m : float, default 0.5
+        Head drop over the bed of the nearest canal in meters.
+
+    Returns
+    -------
+    pandas.Series
+        Bed resistance at 12 degC in d/m per strang; NaN without a sheet or when the drop is not
+        reachable.
+    """
+    resistances = {}
+    for strang, ci in config.iterrows():
+        if strang not in sheets:
+            resistances[strang] = np.nan
+            continue
+        coefficients = transient_coefficients_from_sheet(sheets[strang])
+        flow_per_m = coefficients["series_flow_ref_m3_per_h"] * 24.0 / (ci.nput * ci.dx_tussenputten)
+        offsets = [offset for _, offset in crosssection_image_offsets(ci.r_mirrorwel)]
+        resistances[strang] = strip_bed_resistance(
+            drop_m, flow_per_m, coefficients["kD_ref_m2_per_d"], coefficients["leakage_resistance_d"], offsets
+        )
+    return pd.Series(resistances, name="R_bed_12C_d_per_m", dtype=float)
 
 
 def distance_table(coefficients, index, q_per_well_m3d, radii, *, initial_condition, integration_method="kd_grid"):
