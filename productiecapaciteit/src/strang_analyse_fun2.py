@@ -272,6 +272,7 @@ def get_config(fn="strang_props7.csv"):
         "Lengte (in meters):": float,
         "dx_tussenputten": float,
         "r_mirrorwel": object,
+        "R_bed_12C_d_per_m": float,  # canal-bed resistance at 12 degC (d/m); empty = fixed head
     }
     fp = data_dir / fn
     out = pd.read_csv(fp, index_col=0, sep=";").T
