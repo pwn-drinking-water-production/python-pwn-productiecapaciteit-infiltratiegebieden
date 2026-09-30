@@ -41,6 +41,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import shapely
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
@@ -835,6 +836,89 @@ def well_row_normals(xy):
     tangent = np.gradient(xy, axis=0)
     normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])
     return normal / np.linalg.norm(normal, axis=1, keepdims=True)
+
+
+def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0):
+    """Merge open-water polygons into water bodies.
+
+    A closing (buffer out and back in by ``close_m``) bridges the gaps that culverts and bridges
+    leave between the polygons of one canal, so a canal is one body without extra tips. The union
+    is then simplified.
+
+    Parameters
+    ----------
+    polygons : array-like of shapely.Polygon
+        Open-water polygons.
+    close_m : float, default 8.0
+        Closing distance in meters; gaps up to twice this width are closed.
+    simplify_m : float, default 1.0
+        Simplification tolerance in meters.
+
+    Returns
+    -------
+    shapely.Geometry
+        (Multi)polygon of the water bodies.
+    """
+    merged = shapely.buffer(shapely.buffer(shapely.union_all(polygons), close_m), -close_m)
+    return shapely.simplify(merged, simplify_m)
+
+
+def facing_shores(xy, water, search_m, *, edge_m, min_length_m=20.0, eps_m=0.05):
+    """Shore pieces of the water that the wells see.
+
+    Every ring of every water body is split into edges of at most ``edge_m``. An edge is kept when
+    the sight line from at least one well within ``search_m`` to the edge midpoint (stopped ``eps_m``
+    short of it) crosses no water, the edge's own body included, so far banks and shores behind
+    other water drop out. Runs of kept edges are merged per body (also across the start of a ring)
+    and pieces shorter than ``min_length_m`` are dropped. Rings are oriented with the water on the
+    left of each piece.
+
+    Parameters
+    ----------
+    xy : array-like
+        Well coordinates, shape ``(n, 2)``.
+    water : shapely.Geometry
+        Water bodies from :func:`prepare_water`.
+    search_m : float
+        Largest sight-line length in meters.
+    edge_m : float
+        Longest edge in meters.
+    min_length_m : float, default 20.0
+        Shortest shore piece in meters.
+    eps_m : float, default 0.05
+        Distance in meters by which a sight line stops short of the edge midpoint.
+
+    Returns
+    -------
+    shores : ndarray of shapely.LineString
+        Shore pieces, water on the left.
+    bodies : ndarray of int
+        Index of the water body (part of ``water``) of each piece.
+    """
+    xy = np.asarray(xy, dtype=float)
+    parts = shapely.get_parts(shapely.orient_polygons(water))
+    rings = shapely.segmentize(shapely.get_rings(parts), edge_m)
+    ring_body = np.repeat(np.arange(parts.size), shapely.get_num_interior_rings(parts) + 1)
+    coords, ring = shapely.get_coordinates(rings, return_index=True)
+    same_ring = ring[1:] == ring[:-1]
+    start, end, body = coords[:-1][same_ring], coords[1:][same_ring], ring_body[ring[:-1][same_ring]]
+    middle = 0.5 * (start + end)
+
+    distance = cdist(middle, xy)
+    edge, well = np.nonzero(distance < search_m)
+    toward_well = (xy[well] - middle[edge]) / distance[edge, well][:, None]
+    sight_lines = shapely.linestrings(np.stack([xy[well], middle[edge] + eps_m * toward_well], axis=1))
+    blocked = np.zeros(edge.size, dtype=bool)
+    blocked[shapely.STRtree(parts).query(sight_lines, predicate="intersects")[0]] = True
+    keep = np.zeros(middle.shape[0], dtype=bool)
+    keep[edge[~blocked]] = True
+
+    kept_bodies, piece_index = np.unique(body[keep], return_inverse=True)
+    edges = shapely.linestrings(np.stack([start[keep], end[keep]], axis=1))
+    merged = shapely.line_merge(shapely.multilinestrings(edges, indices=piece_index), directed=True)
+    shores, merged_index = shapely.get_parts(merged, return_index=True)
+    long_enough = shapely.length(shores) >= min_length_m
+    return shores[long_enough], kept_bodies[merged_index[long_enough]]
 
 
 def canal_sides(normals, r_mirrorwel):

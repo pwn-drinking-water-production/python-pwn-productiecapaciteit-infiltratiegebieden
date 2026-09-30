@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import shapely
 from scipy.special import k0
 
 from productiecapaciteit.reports.report_wvpweerstand_transient import (
@@ -11,8 +12,10 @@ from productiecapaciteit.reports.report_wvpweerstand_transient import (
     default_transient_coefficients,
     distance_table,
     drawdown_field,
+    facing_shores,
     image_offsets,
     image_wells,
+    prepare_water,
     row_segments,
     well_row_normals,
 )
@@ -23,6 +26,7 @@ DX = 15.0
 FLOW_FIRST_WEEK_MEAN = "first_week_mean"
 SINGLE_CANAL = [(-1.0, 75.0, "left")]
 TWO_CANALS = [(-1.0, 82.0, "left"), (-1.0, 82.0, "right")]
+SINK_OFFSET = 0.5
 
 
 @pytest.fixture(scope="module")
@@ -307,3 +311,100 @@ def test_canal_mask_at_canal_distance(r_mirrorwel, masked_side):
     mask = canal_mask(gx, gy, xy, canals)
 
     assert mask.tolist() == [False, masked_side[0], False, masked_side[1]]
+
+
+def _row(n, dx, y=0.0):
+    return np.column_stack([np.arange(n) * dx, np.full(n, y)])
+
+
+# --------------------------------------------------------------------------- #
+# Geometry (in a rotated frame at RD coordinates)
+# --------------------------------------------------------------------------- #
+ORIGIN = np.array([102_000.0, 505_000.0])
+ROTATION = np.array([[np.cos(0.65), -np.sin(0.65)], [np.sin(0.65), np.cos(0.65)]])
+XY = _row(41, 15.0)  # 0..600 m at y = 0
+CANAL = shapely.box(-50, 80, 650, 90)
+
+
+def _shores(polygons, search_m=1000.0, *, prepare=False):
+    """facing_shores in the rotated RD frame with 5 m edges; pieces back in the local frame."""
+    in_rd = [shapely.transform(p, lambda c: c @ ROTATION.T + ORIGIN) for p in polygons]
+    water = prepare_water(in_rd) if prepare else shapely.union_all(in_rd)
+    shores, bodies = facing_shores(XY @ ROTATION.T + ORIGIN, water, search_m, edge_m=5.0)
+    # The sink line lies in the water: the water is on the left of every piece.
+    sinks = shapely.offset_curve(shores, SINK_OFFSET)
+    np.testing.assert_allclose(shapely.length(shapely.intersection(sinks, water)), shapely.length(sinks), rtol=1e-4)
+    return [shapely.transform(s, lambda c: (c - ORIGIN) @ ROTATION) for s in shores], bodies
+
+
+def _on_line(shore, y):
+    return np.allclose(shapely.get_coordinates(shore)[:, 1], y, atol=1e-6)
+
+
+def test_facing_shores_keeps_the_near_bank_only():
+    shores, _ = _shores([CANAL])
+    assert len(shores) == 1
+    assert _on_line(shores[0], 80.0)
+    assert shores[0].length == pytest.approx(700.0, abs=1e-6)
+
+
+def test_facing_shores_drops_banks_behind_the_own_water_body():
+    # Near and far canal joined at one end: one body after the union, whose far arm faces the
+    # wells but lies behind the near arm.
+    shores, bodies = _shores([CANAL, shapely.box(-50, 150, 650, 160), shapely.box(640, 90, 650, 150)])
+    assert len(shores) == 1
+    assert _on_line(shores[0], 80.0)
+    assert shores[0].length == pytest.approx(700.0, abs=1e-6)
+    assert bodies.tolist() == [0]
+
+
+def test_facing_shores_partial_shadow_has_the_seen_length():
+    # A strip over x < 300 in front of the canal: a bank point x_e is seen (from any well) iff the
+    # x = 600 well sees it: 0.375 * 600 + 0.625 * x_e > 300 -> x_e > 120. Kept [120, 650] = 530 m,
+    # within one edge (midpoint test).
+    shores, bodies = _shores([CANAL, shapely.box(-200, 30, 300, 50)])
+    canal = [s for s in shores if _on_line(s, 80.0)]
+    assert len(canal) == 1
+    assert abs(canal[0].length - 530.0) <= 5.0
+    assert len(set(bodies.tolist())) == 2
+
+
+def test_facing_shores_bank_seen_from_other_wells_is_kept():
+    # A pond in front of a few wells: the bank behind it is still seen from the other wells.
+    shores, _ = _shores([CANAL, shapely.box(280, 30, 320, 50)])
+    canal = [s for s in shores if _on_line(s, 80.0)]
+    assert len(canal) == 1
+    assert canal[0].length == pytest.approx(700.0, abs=1e-6)
+
+
+def test_facing_shores_joins_a_run_across_the_ring_start():
+    # The ring starts at a 3 m kink inside the near bank.
+    ring = [(300, 77), (650, 80), (650, 90), (-50, 90), (-50, 80), (300, 77)]
+    shores, _ = _shores([shapely.Polygon(ring)])
+    assert len(shores) == 1
+    assert shores[0].length == pytest.approx(2 * np.hypot(350.0, 3.0), abs=1e-6)
+
+
+def test_facing_shores_row_inside_a_hole():
+    # Water all around the row: the whole inner ring is one closed piece.
+    water = shapely.difference(shapely.box(-100, -90, 700, 90), shapely.box(-50, -80, 650, 80))
+    shores, _ = _shores([water])
+    assert len(shores) == 1
+    assert shores[0].is_closed
+    assert shores[0].length == pytest.approx(2 * 700 + 2 * 160, abs=1e-6)
+
+
+def test_facing_shores_clips_a_canal_at_the_search_distance():
+    # The canal runs 3 km past the row end; bank edges count within 200 m of a well.
+    shores, _ = _shores([shapely.box(-50, 80, 3600, 90)], 200.0)
+    reach = 600.0 + np.sqrt(200.0**2 - 80.0**2)
+    assert len(shores) == 1
+    assert abs(shores[0].length - (reach + 50.0)) <= 5.0
+
+
+def test_prepare_water_closes_a_bridge_gap():
+    # A 5 m culvert gap splits the canal into two polygons; closed, it is one body and one shore.
+    shores, bodies = _shores([shapely.box(-50, 80, 300, 90), shapely.box(305, 80, 650, 90)], prepare=True)
+    assert len(shores) == 1
+    assert bodies.tolist() == [0]
+    assert shores[0].length == pytest.approx(700.0, abs=1.0)  # the closing cuts the corners by a few decimeters
