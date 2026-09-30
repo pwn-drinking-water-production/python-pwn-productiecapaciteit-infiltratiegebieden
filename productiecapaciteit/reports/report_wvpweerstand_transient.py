@@ -42,6 +42,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.sparse
 import shapely
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import CubicSpline
@@ -1150,7 +1151,7 @@ def radial_kernel(points, sources, strengths, radii, well_radius_m, *, max_eleme
     well_radius_m : float
         Distances are clipped at the well radius.
     max_elements : int, default 20_000_000
-        Points are processed in chunks of at most this many (point, source, radius) values.
+        Points are processed in chunks of at most ``max_elements / 8`` (point, source) pairs.
 
     Returns
     -------
@@ -1161,15 +1162,30 @@ def radial_kernel(points, sources, strengths, radii, well_radius_m, *, max_eleme
     sources = np.asarray(sources, dtype=float).reshape(-1, 2)
     strengths = np.asarray(strengths, dtype=float).reshape(sources.shape[0], -1)
     radii = np.asarray(radii, dtype=float)
-    cardinal = CubicSpline(np.log(radii), np.eye(radii.size))
+    log_radii = np.log(radii)
+    # On interval i the cardinal splines are card_j(x) = sum_p coef[p, i, j] (x - log_radii[i]) ** (3 - p).
+    coef = CubicSpline(log_radii, np.eye(radii.size)).c
+    n_intervals = radii.size - 1
     kernel = np.empty((points.shape[0], radii.size, strengths.shape[1]))
-    chunk = max(1, max_elements // (sources.shape[0] * radii.size))
+    chunk = max(1, max_elements // (8 * sources.shape[0]))
     for start in range(0, points.shape[0], chunk):
-        distance = np.maximum(cdist(points[start : start + chunk], sources), well_radius_m)
+        distance = np.maximum(cdist(sources, points[start : start + chunk]), well_radius_m)
         if distance.max() > radii[-1]:
             msg = f"Largest source distance {distance.max():.1f} m exceeds the table range {radii[-1]:.1f} m"
             raise ValueError(msg)
-        kernel[start : start + chunk] = np.tensordot(cardinal(np.log(distance)), strengths, axes=([1], [0]))
+        n_points = distance.shape[1]
+        log_distance = np.log(distance)
+        interval = np.clip(np.searchsorted(log_radii, log_distance, side="right") - 1, 0, n_intervals - 1)
+        offset = log_distance - log_radii[interval]
+        powers = np.stack([offset**3, offset**2, offset, np.ones_like(offset)], axis=-1)
+        # Sum the source strengths per (point, power, interval), then contract with the spline coefficients.
+        rows = (np.arange(n_points)[:, None] * 4 + np.arange(4)) * n_intervals + interval[..., None]
+        binning = scipy.sparse.csc_array(
+            (powers.ravel(), rows.ravel(), np.arange(sources.shape[0] + 1) * 4 * n_points),
+            shape=(n_points * 4 * n_intervals, sources.shape[0]),
+        )
+        binned = (binning @ strengths).reshape(n_points, 4, n_intervals, -1)
+        kernel[start : start + n_points] = np.einsum("xpik,pij->xjk", binned, coef, optimize=True)
     return kernel
 
 
