@@ -198,6 +198,20 @@ def test_time_shapes_modulated_copies_and_steady_initial_values():
     np.testing.assert_array_equal(shapes[0, 1:3], [3.5, 3.5])
 
 
+def test_time_shapes_skip_constant_modulations(constant_kd_coefficients):
+    # A constant kD or bed resistance (fixed head, constant T_bodem) would add all-zero shapes.
+    index = pd.date_range("2021-01-01", periods=5, freq="D")
+    q = np.array([3.0, 4.0, 5.0, 6.0, 7.0])
+    kd = np.array([150.0, 120.0, 120.0, 120.0, 90.0])
+    constant = [bed_resistance(constant_kd_coefficients, index, np.full(5, 7.0), 0.1), np.zeros(5), np.full(5, 120.0)]
+
+    shapes, initial = time_shapes(index, q, 3.5, [1.0, 10.0], [constant[0], kd, *constant[1:]])
+
+    expected_shapes, expected_initial = time_shapes(index, q, 3.5, [1.0, 10.0], [kd])
+    np.testing.assert_array_equal(shapes, expected_shapes)
+    np.testing.assert_array_equal(initial, expected_initial)
+
+
 @pytest.fixture(scope="module")
 def constant_kd_coefficients():
     return default_transient_coefficients(kd_ref_m2_per_d=120.0, leakage_resistance_d=57.0)

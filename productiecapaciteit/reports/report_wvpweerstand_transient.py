@@ -1007,7 +1007,8 @@ def time_shapes(index, q_per_well_m3d, initial_q_m3d, time_constants_d, modulati
     """Time shapes of the line-sink inflow and their steady pre-period values.
 
     The base shapes are ``q`` and its first-order lags (:func:`lagged_histories`). Every modulation
-    ``f`` (the kD model, the bed-resistance factor) adds the copies ``base * (f / mean(f) - 1)``.
+    ``f`` (the kD model, the bed-resistance factor) adds the copies ``base * (f / mean(f) - 1)``;
+    a constant modulation (constant kD, fixed head, constant temperature) adds nothing.
 
     Parameters
     ----------
@@ -1020,7 +1021,7 @@ def time_shapes(index, q_per_well_m3d, initial_q_m3d, time_constants_d, modulati
     time_constants_d : array-like
         Lag time constants in days.
     modulations : sequence of array-like, default ()
-        Positive series on ``index``.
+        Series on ``index``, positive or all zero.
 
     Returns
     -------
@@ -1034,7 +1035,10 @@ def time_shapes(index, q_per_well_m3d, initial_q_m3d, time_constants_d, modulati
     base_initial = np.full(base.shape[1], float(initial_q_m3d))
     shapes, initial = [base], [base_initial]
     for modulation in modulations:
-        relative = np.asarray(modulation, dtype=float) / np.mean(modulation) - 1.0
+        modulation = np.asarray(modulation, dtype=float)
+        if np.ptp(modulation) == 0.0:
+            continue
+        relative = modulation / modulation.mean() - 1.0
         shapes.append(base * relative[:, None])
         initial.append(base_initial * relative[0])
     return np.hstack(shapes), np.concatenate(initial)
@@ -1386,7 +1390,6 @@ def solve_transient_linesinks(
         stacked = np.column_stack([system.reshape(-1, n_columns), rhs.reshape(-1)])
         triangle = np.linalg.qr(np.vstack([triangle, stacked]), mode="r")
     scale = np.linalg.norm(triangle[:, :-1], axis=0)
-    scale[scale == 0.0] = 1.0
     coefficients = (np.linalg.lstsq(triangle[:, :-1] / scale, triangle[:, -1], rcond=None)[0] / scale).reshape(
         n_shapes, n_basis
     )
