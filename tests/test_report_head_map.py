@@ -8,12 +8,15 @@ from numpy.polynomial import legendre
 from scipy.special import k0
 
 from productiecapaciteit.reports.report_wvpweerstand_transient import (
+    _legendre_basis,
     bed_resistance,
     default_transient_coefficients,
     distance_table,
+    drawdown_from_kernel,
     facing_shores,
     lagged_histories,
     linesink_sources,
+    map_sources,
     prepare_water,
     radial_kernel,
     row_segments,
@@ -48,20 +51,15 @@ def _k0_tables(radii, kd, leakage_factor, shapes):
 
 def _field(solution, tables, radii, wells_xy, points, spacing=SINK_OFFSET / 2.0):
     """Drawdown at points and all times through the map path: wells pump shape 0, nodes their strengths."""
-    nodes, _, strengths = linesink_sources(solution, spacing)
-    n_shapes = tables.shape[2]
-    sources = np.concatenate([wells_xy, nodes])
-    source_strengths = np.concatenate([np.eye(1, n_shapes).repeat(len(wells_xy), axis=0), strengths])
-    kernel = radial_kernel(points, sources, source_strengths, radii, WELL_RADIUS)
-    return tables.reshape(tables.shape[0], -1) @ kernel.reshape(len(points), -1).T
+    sources, strengths = map_sources(solution, wells_xy, spacing)
+    return drawdown_from_kernel(tables, radial_kernel(points, sources, strengths, radii, WELL_RADIUS))
 
 
 def _inflow_along(solution, shapes, piece, fractions):
     """Infiltration per metre q' at arc-length fractions of one shore piece (m2/d)."""
-    orders = solution["orders"]
-    offset = np.concatenate([[0], np.cumsum(orders + 1)])[piece]
-    coefficients = solution["coefficients"][:, offset : offset + orders[piece] + 1]
-    return -shapes @ (legendre.legvander(2.0 * np.asarray(fractions) - 1.0, orders[piece]) @ coefficients.T).T
+    per_piece = [np.asarray(fractions if p == piece else [], dtype=float) for p in range(solution["orders"].size)]
+    _, _, basis = _legendre_basis(solution["sinks"], solution["orders"], per_piece)
+    return -shapes @ (basis @ solution["coefficients"].T).T
 
 
 # --------------------------------------------------------------------------- #

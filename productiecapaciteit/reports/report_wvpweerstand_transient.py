@@ -1345,8 +1345,8 @@ def solve_transient_linesinks(
     -------
     dict
         ``sinks`` (sink lines), ``orders``, ``coefficients`` (``a``, shape ``(K, n_basis)``),
-        ``controls`` (shape ``(n_controls, 2)``), ``control_piece``, ``inflow_per_m`` (``q'`` at the
-        controls in m2/d, shape ``(n_times, n_controls)``) and ``shore_residual_m``
+        ``controls`` (shape ``(n_controls, 2)``), ``inflow_per_m`` (``q'`` at the controls in m2/d,
+        shape ``(n_times, n_controls)``) and ``shore_residual_m``
         (``s - R q'`` at the controls in m, same shape).
     """
     tables = np.asarray(tables, dtype=float)
@@ -1360,7 +1360,7 @@ def solve_transient_linesinks(
     nodes, _, node_basis = linesink_nodes(sinks, orders, sink_offset_m / 2.0)
     counts = 3 * (orders + 1)
     fractions = [(1.0 - np.cos(np.pi * np.arange(count) / (count - 1))) / 2.0 for count in counts]
-    controls, control_piece, control_basis = _legendre_basis(shores, orders, fractions)
+    controls, _, control_basis = _legendre_basis(shores, orders, fractions)
     kernel_sinks = radial_kernel(controls, nodes, node_basis, radii, well_radius_m, max_elements=max_elements)
     kernel_wells = radial_kernel(
         controls, wells_xy, np.ones(len(wells_xy)), radii, well_radius_m, max_elements=max_elements
@@ -1393,14 +1393,13 @@ def solve_transient_linesinks(
 
     control_kernel = np.einsum("cjn,kn->cjk", kernel_sinks, coefficients)
     control_kernel[:, :, 0] += kernel_wells
-    drawdown = tables.reshape(n_times, -1) @ control_kernel.reshape(n_controls, -1).T
+    drawdown = drawdown_from_kernel(tables, control_kernel)
     inflow_per_m = -shapes @ (control_basis @ coefficients.T).T
     return {
         "sinks": sinks,
         "orders": orders,
         "coefficients": coefficients,
         "controls": controls,
-        "control_piece": control_piece,
         "inflow_per_m": inflow_per_m,
         "shore_residual_m": drawdown - resistance[:, None] * inflow_per_m,
     }
@@ -1429,6 +1428,52 @@ def linesink_sources(solution, spacing_m):
     """
     nodes, piece, basis = linesink_nodes(solution["sinks"], solution["orders"], spacing_m)
     return nodes, piece, basis @ solution["coefficients"].T
+
+
+def map_sources(solution, wells_xy, spacing_m):
+    """All sources of a solved line-sink model for :func:`radial_kernel`.
+
+    Parameters
+    ----------
+    solution : dict
+        Result of :func:`solve_transient_linesinks`.
+    wells_xy : array-like
+        Well coordinates, shape ``(n_wells, 2)``; each pumps shape 0.
+    spacing_m : float
+        Largest sink-node spacing in meters, see :func:`linesink_sources`.
+
+    Returns
+    -------
+    sources : ndarray
+        The wells followed by the sink nodes, shape ``(n_wells + n, 2)``.
+    strengths : ndarray
+        Strength of every source per shape, shape ``(n_wells + n, K)``.
+    """
+    wells_xy = np.asarray(wells_xy, dtype=float)
+    nodes, _, strengths = linesink_sources(solution, spacing_m)
+    well_strengths = np.zeros((wells_xy.shape[0], strengths.shape[1]))
+    well_strengths[:, 0] = 1.0
+    return np.concatenate([wells_xy, nodes]), np.concatenate([well_strengths, strengths])
+
+
+def drawdown_from_kernel(tables, kernel):
+    """Drawdown at the kernel's points for every time of the tables.
+
+    Parameters
+    ----------
+    tables : array-like
+        Distance tables, shape ``(n_times, n_radii, K)``.
+    kernel : array-like
+        :func:`radial_kernel`, shape ``(n_points, n_radii, K)``.
+
+    Returns
+    -------
+    ndarray
+        Drawdown in meters, shape ``(n_times, n_points)``.
+    """
+    tables = np.asarray(tables, dtype=float)
+    kernel = np.asarray(kernel, dtype=float)
+    return tables.reshape(tables.shape[0], -1) @ kernel.reshape(kernel.shape[0], -1).T
 
 
 # --------------------------------------------------------------------------- #
