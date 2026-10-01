@@ -623,10 +623,10 @@ XY = _row(41, 15.0)  # 0..600 m at y = 0
 CANAL = shapely.box(-50, 80, 650, 90)
 
 
-def _shores(polygons, search_m=1000.0, *, prepare=False):
+def _shores(polygons, search_m=1000.0, *, prepare=False, inset_m=0.0):
     """facing_shores in the rotated RD frame with 5 m edges; pieces back in the local frame."""
     in_rd = [shapely.transform(p, lambda c: c @ ROTATION.T + ORIGIN) for p in polygons]
-    water = prepare_water(in_rd) if prepare else shapely.union_all(in_rd)
+    water = prepare_water(in_rd, inset_m=inset_m) if prepare else shapely.union_all(in_rd)
     shores, bodies = facing_shores(XY @ ROTATION.T + ORIGIN, water, search_m, edge_m=5.0)
     # The sink line lies in the water: the water is on the left of every piece.
     sinks = shapely.offset_curve(shores, SINK_OFFSET)
@@ -714,6 +714,22 @@ def test_prepare_water_drops_slivers_without_room_for_a_sink_line():
     assert len(shores) == 1
     assert shapely.get_coordinates(shores[0])[:, 1].min() > 79.0  # the canal bank, corners rounded by 0.5 m
     assert shores[0].length == pytest.approx(700.0, abs=1.0)
+
+
+def test_prepare_water_moves_the_boundary_into_the_water():
+    # A 2 m inset moves the near bank of the 10 m wide canal 2 m into the water (relative to no
+    # inset, so the simplification's slight tilt of the bank cancels) and drops a 4 m wide ditch
+    # facing the wells, which is narrower than 2 * (2 + 0.5) m and so has no room for the shore and
+    # the sink line; without the inset the ditch is kept.
+    polygons = [CANAL, shapely.box(100, -64, 500, -60)]
+    plain, _ = _shores(polygons, prepare=True)
+    inset, _ = _shores(polygons, prepare=True, inset_m=2.0)
+    assert len(plain) == 2
+    assert len(inset) == 1
+    canal = max(plain, key=lambda shore: shapely.get_coordinates(shore)[:, 1].mean())
+    shift = shapely.distance(shapely.points(shapely.get_coordinates(inset[0])), canal)
+    straight = np.abs(shapely.get_coordinates(inset[0])[:, 0] - 300.0) < 300.0
+    np.testing.assert_allclose(shift[straight], 2.0, rtol=0.0, atol=0.01)
 
 
 def test_split_shores_cuts_pieces_by_their_distance_to_the_wells():

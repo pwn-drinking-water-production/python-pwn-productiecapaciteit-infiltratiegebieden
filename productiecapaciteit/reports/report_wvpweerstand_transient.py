@@ -845,13 +845,15 @@ def well_row_normals(xy):
     return normal / np.linalg.norm(normal, axis=1, keepdims=True)
 
 
-def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0, open_m=0.5):
+def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0, open_m=0.5, inset_m=0.0):
     """Merge open-water polygons into water bodies.
 
     A closing (buffer out and back in by ``close_m``) bridges the gaps that culverts and bridges
     leave between the polygons of one canal, so a canal is one body without extra tips. The union
-    is then simplified, and an opening (buffer in and back out by ``open_m``) removes slivers
-    narrower than ``2 open_m``, which have no room for a sink line ``open_m`` into the water.
+    is then simplified and shrunk by ``inset_m``, so the boundary condition sits that far into the
+    open water instead of on the mapped shoreline. Finally an opening (buffer in and back out by
+    ``open_m``) removes slivers narrower than ``2 open_m``, which have no room for a sink line
+    ``open_m`` into the water; with the inset, water narrower than ``2 (inset_m + open_m)`` drops out.
 
     Parameters
     ----------
@@ -863,14 +865,17 @@ def prepare_water(polygons, *, close_m=8.0, simplify_m=1.0, open_m=0.5):
         Simplification tolerance in meters.
     open_m : float, default 0.5
         Opening distance in meters, the sink offset.
+    inset_m : float, default 0.0
+        Distance in meters by which the boundary is moved from the mapped shoreline into the water.
 
     Returns
     -------
     shapely.Geometry
-        (Multi)polygon of the water bodies.
+        (Multi)polygon of the water bodies, shrunk by ``inset_m``.
     """
     merged = shapely.buffer(shapely.buffer(shapely.union_all(polygons), close_m), -close_m)
-    return shapely.buffer(shapely.buffer(shapely.simplify(merged, simplify_m), -open_m), open_m)
+    shrunk = shapely.buffer(shapely.simplify(merged, simplify_m), -(inset_m + open_m))
+    return shapely.buffer(shrunk, open_m)
 
 
 def facing_shores(xy, water, search_m, *, edge_m, min_length_m=20.0, eps_m=0.05):
