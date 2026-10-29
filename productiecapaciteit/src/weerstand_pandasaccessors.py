@@ -1,6 +1,7 @@
 import warnings
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from productiecapaciteit.src.wvp_transient_funs import (
@@ -157,6 +158,55 @@ class WellResistanceAccessor:
         # Flow per put
         # Verlaging: er komen positieve waarden uit
         return self.a_model(index) * flow
+
+    def resistance_model(
+        self,
+        index: pd.DatetimeIndex,
+        *,
+        temperature: npt.ArrayLike | pd.Series | None = None,
+        side: str = "right",
+    ) -> pd.Series:
+        """Return positive day/m2 filter resistance with explicit temperature semantics.
+
+        Parameters
+        ----------
+        index : DatetimeIndex
+            Evaluation timestamps.
+        temperature : array-like, Series, float or None, optional
+            Extracted-water temperature in degC. Required for explicitly
+            reference-normalized coefficients; ignored with a warning for
+            legacy empirical coefficients.
+        side : {"right", "left"}, default "right"
+            Use the post-cleaning value or preceding-period limit at a cleaning.
+
+        Returns
+        -------
+        Series
+            Resistance for well flow in m3/day: -a_hour/24, with viscosity
+            applied only to explicitly reference-normalized coefficients.
+        """
+        from productiecapaciteit.src.filter_calibration import filter_resistance  # noqa: PLC0415
+
+        return filter_resistance(self._obj, index, temperature=temperature, side=side)
+
+    def split_intervals(self, edges: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        """Insert cleaning dates into strictly increasing forcing boundaries.
+
+        Parameters
+        ----------
+        edges : DatetimeIndex
+            Forcing interval boundaries, including the initial instant.
+
+        Returns
+        -------
+        DatetimeIndex
+            Boundaries split at cleanings. Carry each original forcing value
+            onto its subintervals and evaluate resistance on the left at their
+            right-labelled endpoints.
+        """
+        from productiecapaciteit.src.filter_calibration import split_filter_intervals  # noqa: PLC0415
+
+        return split_filter_intervals(edges, self._obj)
 
     def plot_werkzh(self, ax, dates_in_excel=None):
         if dates_in_excel is not None:

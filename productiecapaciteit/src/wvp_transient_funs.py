@@ -1,19 +1,222 @@
+"""Variable-coefficient aquifer response, geometry and causal source histories."""
+
 import bisect
 import logging
 import math
+from dataclasses import dataclass
 from itertools import pairwise
 from numbers import Integral
 
 import numpy as np
 import pandas as pd
 from scipy import linalg
-from scipy.integrate import quad
-from scipy.interpolate import PchipInterpolator
+from scipy.integrate import quad, quad_vec
+from scipy.interpolate import BarycentricInterpolator, PchipInterpolator
 from scipy.optimize import brentq
 from scipy.signal import fftconvolve
 from scipy.special import exp1, k0, k1
 
 logger = logging.getLogger(__name__)
+
+
+class IntervalResponse:
+    """Causal interval Green operator for independent piecewise-constant sources.
+
+    Time is in days, rates in m3/day and transmissivity in m2/day. ``index``
+    contains *edges*, including the explicit initial instant; there are N-1
+    unknown rates. kD uses the same prescribed PCHIP convention and finite-radius
+    distance clipping as ``hantush_variable_kd``. Future flow is never an input.
+    """
+
+    def __init__(self, index, kd, radii, storage, leakage):
+        """Validate the coefficient grid and construct its cumulative kD."""
+        self.index = pd.DatetimeIndex(index)
+        if (
+            len(self.index) < 2  # noqa: PLR2004 -- a forcing interval requires two edges
+            or self.index.hasnans
+            or not self.index.is_unique
+            or not self.index.is_monotonic_increasing
+        ):
+            message = "index must contain strictly increasing interval edges"
+            raise ValueError(message)
+        self.days = np.asarray((self.index - self.index[0]) / pd.Timedelta(days=1))
+        self.kd = as_float_array("kd", kd, len(self.index))
+        self.radii = as_float_array("radii", radii)
+        if np.any(self.kd <= 0) or np.any(self.radii <= 0) or np.any(np.diff(self.radii) <= 0):
+            message = "kd and increasing radii must be positive"
+            raise ValueError(message)
+        self.storage = as_positive_float("storage", storage)
+        self.leakage = as_positive_float("leakage", leakage)
+        self.alpha2 = self.radii**2 * self.storage / 4
+        self.beta = np.sqrt(1 / (self.leakage * self.storage))
+        self.kd_fun = PchipInterpolator(self.days, self.kd, extrapolate=False)
+        self.cumulative = self.kd_fun.antiderivative()
+
+    def kernel(self, target, source):
+        """Radial impulse kernel at source times, shape (radii, times)."""
+        source = np.atleast_1d(source)
+        dk = self.cumulative(target) - self.cumulative(source)
+        lag = target - source
+        valid = (dk > 0) & (lag >= 0)
+        safe = np.where(valid, dk, 1)
+        return np.where(
+            valid[None, :],
+            np.exp(-self.alpha2[:, None] / safe - self.beta**2 * lag) * _INV_4PI / safe,
+            0,
+        )
+
+    def interval_weights(self, target, intervals):
+        """Integrate unit rates over selected right-labelled intervals.
+
+        Adaptive vector quadrature resolves each radius' near-diagonal peak.
+        No history tail is discarded. A target inside an interval integrates
+        only its elapsed portion; intervals entirely in the future return zero.
+        """
+        if not np.isfinite(target) or target < 0 or target > self.days[-1]:
+            message = "target must lie within the coefficient grid"
+            raise ValueError(message)
+        intervals = np.atleast_1d(intervals).astype(int)
+        if np.any(intervals < 0) or np.any(intervals >= len(self.days) - 1):
+            message = "interval index outside the forcing grid"
+            raise ValueError(message)
+        out = np.zeros((len(self.radii), len(intervals)))
+        for column, interval in enumerate(intervals):
+            left, right = self.days[interval], min(self.days[interval + 1], target)
+            if right <= left:
+                continue
+            # Supply all near-kernel peaks to adaptive quadrature, including the
+            # finite-radius self peak, which uniform quadrature can miss.
+            peaks = target - self.alpha2 / float(self.kd_fun(target))
+            points = np.unique(peaks[(peaks > left) & (peaks < right)])
+            out[:, column] = quad_vec(
+                lambda tau: self.kernel(target, tau)[:, 0],
+                left,
+                right,
+                points=points,
+                epsabs=1e-12,
+                epsrel=1e-10,
+            )[0]
+        return out
+
+    def steady_response(self):
+        """Return the unit steady field under initial coefficients (De Glee)."""
+        return k0(self.radii / np.sqrt(self.kd[0] * self.leakage)) / (2 * np.pi * self.kd[0])
+
+    def initial_response(self, targets=None):
+        """Carry the *initial* steady field through the subsequent kD history."""
+        targets = self.days if targets is None else np.atleast_1d(targets).astype(float)
+        if np.any(~np.isfinite(targets)) or np.any(targets < 0) or np.any(targets > self.days[-1]):
+            message = "initial-field targets outside the coefficient grid"
+            raise ValueError(message)
+        positive = targets > 0
+        times = np.r_[0, targets[positive]]
+        out = np.tile(self.steady_response(), (len(targets), 1))
+        if positive.any():
+            out[positive] = np.column_stack([
+                _variable_kd_initial_drawdown(
+                    np.ones(1),
+                    np.array([np.sqrt(alpha2)]),
+                    self.beta,
+                    self.kd[0],
+                    1,
+                    times,
+                    self.cumulative(times),
+                    epsabs=1e-12,
+                    epsrel=1e-10,
+                )[1:]
+                for alpha2 in self.alpha2
+            ])
+        return out
+
+    def history(self, n_sources, *, rtol=1e-8, atol=1e-11):
+        """Create an append-only, signed, adaptive polynomial history tree.
+
+        Distant blocks interpolate the Green kernel at 16 Gauss nodes. Integrated
+        Lagrange moments retain every committed interval and every source.
+        An embedded 8-node estimate controls refinement; near or unresolved
+        blocks descend to adaptive interval quadrature. This is a measured
+        approximation, not an exact error bound or a truncated memory window.
+        ``rtol=0, atol=0`` selects the direct reference.
+        """
+        return _IntervalHistory(self, n_sources, rtol, atol)
+
+
+@dataclass
+class _HistoryBlock:
+    first: int
+    last: int
+    moments: np.ndarray
+    children: tuple
+
+
+class _IntervalHistory:
+    def __init__(self, response, n_sources, rtol, atol):
+        if rtol < 0 or atol < 0 or n_sources < 1:
+            message = "history tolerances must be nonnegative and n_sources positive"
+            raise ValueError(message)
+        self.response, self.n_sources = response, n_sources
+        self.rtol, self.atol = rtol, atol
+        self.nodes, self.weights = np.polynomial.legendre.leggauss(16)
+        low, _ = np.polynomial.legendre.leggauss(8)
+        self.low_nodes = low
+        self.low_projection = BarycentricInterpolator(low, np.eye(8))(self.nodes).T
+        self.cardinal = BarycentricInterpolator(self.nodes, np.eye(16))
+        self.blocks = []
+        self.rates = []
+        self.accepted_blocks = 0
+        self.direct_intervals = 0
+
+    def _times(self, block, nodes):
+        left, right = self.response.days[[block.first, block.last + 1]]
+        return (left + right) / 2 + (right - left) / 2 * nodes
+
+    def append(self, interval, rates):
+        """Commit one solved source interval, strictly chronologically."""
+        rates = np.asarray(rates, dtype=float)
+        if interval != len(self.rates) or rates.shape != (self.n_sources,) or not np.isfinite(rates).all():
+            message = "append requires the next interval and finite rates of every independent source"
+            raise ValueError(message)
+        self.rates.append(rates.copy())
+        width = self.response.days[interval + 1] - self.response.days[interval]
+        block = _HistoryBlock(interval, interval, width / 2 * self.weights[:, None] * rates, ())
+        while self.blocks and self.blocks[-1].last - self.blocks[-1].first == block.last - block.first:
+            left = self.blocks.pop()
+            parent = _HistoryBlock(left.first, block.last, np.zeros_like(block.moments), (left, block))
+            start, end = self.response.days[[parent.first, parent.last + 1]]
+            for child in parent.children:
+                positions = (2 * self._times(child, self.nodes) - start - end) / (end - start)
+                parent.moments += self.cardinal(positions).T @ child.moments
+            block = parent
+        self.blocks.append(block)
+
+    def _evaluate(self, block, target):
+        response = self.response
+        left, right = response.days[[block.first, block.last + 1]]
+        if left >= target:
+            return np.zeros((len(response.radii), self.n_sources))
+        if right <= target and target - right >= 2 * (right - left) and (self.rtol > 0 or self.atol > 0):
+            high_kernel = response.kernel(target, self._times(block, self.nodes))
+            high = high_kernel @ block.moments
+            low = response.kernel(target, self._times(block, self.low_nodes)) @ (self.low_projection @ block.moments)
+            # Allocate absolute tolerance by duration. Relative error is scaled
+            # by unsigned contributions, not a cancellation-prone net head.
+            scale = np.abs(high_kernel) @ np.abs(block.moments)
+            tolerance = self.atol * (right - left) / max(target, right - left) + self.rtol * scale
+            if np.all(np.abs(high - low) <= tolerance):
+                self.accepted_blocks += 1
+                return high
+        if block.children:
+            return self._evaluate(block.children[0], target) + self._evaluate(block.children[1], target)
+        self.direct_intervals += 1
+        return response.interval_weights(target, [block.first]) * self.rates[block.first]
+
+    def evaluate(self, target):
+        """Evaluate only committed history; future source rates do not exist."""
+        return sum(
+            (self._evaluate(block, target) for block in self.blocks),
+            start=np.zeros((len(self.response.radii), self.n_sources)),
+        )
+
 
 _INV_4PI = 1.0 / (4.0 * np.pi)
 # Sides of a canal relative to the row direction (increasing well number).

@@ -21,7 +21,7 @@ dependencies = [
     "pyarrow",
     "scipy",
     "shapely>=2.1",
-    "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git",
+    "dawacotools @ git+https://github.com/bdestombe/python-dawaco-tools.git@31720fdabe6a0652a0a1b39dbc04c692a41791a6",
     "unhcrpyplotstyle @ git+https://github.com/leichen88/unhcrpyplotstyle.git",
     "pandas-stubs>=2.0.2.230605",
     "openpyxl",
@@ -43,7 +43,7 @@ classifiers = [
 
 [project.optional-dependencies]
 test = [
-    "pastas",
+    "pastas>=1.5,<2",
     "pytest",
 ]
 
