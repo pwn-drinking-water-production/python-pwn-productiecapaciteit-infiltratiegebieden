@@ -271,7 +271,13 @@ class RobinSolution:
         if np.any(np.diff(targets) < 0) or np.any(targets > self.response.days[len(self.rates)]):
             message = "field targets must be ordered and within the solved history"
             raise ValueError(message)
-        initial = self.response.initial_response(targets)[:, :, None] * self.initial_rates
+        if np.any(~np.isfinite(targets)) or np.any(targets < 0):
+            message = "initial-field targets outside the coefficient grid"
+            raise ValueError(message)
+        if np.any(self.initial_rates):
+            initial = self.response.initial_response(targets)[:, :, None] * self.initial_rates
+        else:
+            initial = np.zeros((len(targets), len(self.response.radii), self.rates.shape[1]))
         history = self.response.history(
             self.rates.shape[1], rtol=self.history_settings[0], atol=self.history_settings[1]
         )
@@ -353,10 +359,10 @@ def solve_transient(  # noqa: C901 -- validation, initialization and chronologic
         raise ValueError(message)
     nw = len(geometry.wells)
     ns = geometry.source_basis.shape[1]
-    rates = np.empty((n, ns))
-    heads, drawdown = np.empty(n), np.empty((n, nw))
-    hard, shore = np.empty((n, nw + 1)), np.empty((n, len(geometry.controls)))
-    ranks, conditions = np.empty((n, 2), int), np.empty((n, 2))
+    rates = np.empty((stop, ns))
+    heads, drawdown = np.empty(stop), np.empty((stop, nw))
+    hard, shore = np.empty((stop, nw + 1)), np.empty((stop, len(geometry.controls)))
+    ranks, conditions = np.empty((stop, 2), int), np.empty((stop, 2))
     initial_rates = np.zeros(ns)
     initial_head = float(arrays[3][0] if initial_background is None else initial_background)
 
@@ -383,7 +389,7 @@ def solve_transient(  # noqa: C901 -- validation, initialization and chronologic
         )
         initial_rates = np.r_[state.well_flow, state.shore_amplitude]
         initial_head = state.common_head
-    initial_field = response.initial_response()
+    initial_field = response.initial_response() if np.any(initial_rates) else np.zeros((stop + 1, len(response.radii)))
     history = response.history(ns, rtol=history_rtol, atol=history_atol)
     for j in range(begin):
         history.append(j, rates[j])
@@ -402,15 +408,15 @@ def solve_transient(  # noqa: C901 -- validation, initialization and chronologic
     return RobinSolution(
         response,
         geometry,
-        rates[:stop],
+        rates,
         initial_rates,
         initial_head,
-        heads[:stop],
-        drawdown[:stop],
-        hard[:stop],
-        shore[:stop],
-        ranks[:stop],
-        conditions[:stop],
+        heads,
+        drawdown,
+        hard,
+        shore,
+        ranks,
+        conditions,
         (history_rtol, history_atol),
         (history.accepted_blocks, history.direct_intervals),
         tuple(a.copy() for a in arrays),
