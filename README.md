@@ -1,6 +1,12 @@
 # python-pwn-productiecapaciteit-infiltratiegebieden
 Productiecapaciteit van infiltratiegebieden ICAS en IKIEF
 
+## Flow-driven common-head modelling
+
+See [the causal Robin solver](docs/robin_model.md) and
+[temperature-aware filter coefficients](docs/filter_coefficients.md) for units,
+initialization, calibration provenance and scientific-acceptance limitations.
+
 # Install instructions
 Via de github desktop applicatie clone deze repository naar een folder op je computer:
 
